@@ -937,3 +937,18 @@ pre[class*="language-"] {
     @apply rounded-md px-1.5 py-1 text-gray-400 transition hover:bg-gray-100 dark:hover:bg-white/10;
   }
 }
+
+@layer components {
+  .tag {
+    @apply inline-block rounded-md bg-gray-100 px-1.5 py-0.5 text-theme-xs whitespace-nowrap text-gray-600 dark:bg-white/10 dark:text-gray-400;
+  }
+  .tag-ok {
+    @apply bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400;
+  }
+  .tag-warn {
+    @apply bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-warning-400;
+  }
+  .tag-new {
+    @apply bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400;
+  }
+}

@@ -299,6 +299,7 @@ def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7,
     visited = 0
     complete = True
     depth = 0
+    leaves = []  # خانه‌هایی که دیگر تقسیم نشدند — برای join قیمت به ازای هر خانه
 
     # خانه‌های هم‌سطح از هم مستقل‌اند، پس هر موج موازی اجرا می‌شود.
     # این endpoint محدودیت نرخ ندارد (۱۲۰ درخواست در ۲۵ ثانیه تست شده).
@@ -330,6 +331,8 @@ def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7,
                     (min_lon, mid_lat, mid_lon, max_lat),
                     (mid_lon, mid_lat, max_lon, max_lat),
                 ]
+            elif count > 0:
+                leaves.append((box, count))
 
         if on_progress:
             on_progress(visited, len(next_wave), len(found), total)
@@ -341,7 +344,29 @@ def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7,
     if wave and depth > max_depth:
         complete = False
 
-    return total or 0, found, complete
+    return total or 0, found, complete, leaves
+
+
+def exact_prices_for_cells(city_ids, form_data, leaves, workers=6):
+    """قیمت دقیق از لیست، به ازای هر خانه نقشه و موازی.
+
+    هر خانه حداکثر ۲۰۰ آگهی دارد = حداکثر ۹ صفحه، پس پوشش همیشه کامل است —
+    بر خلاف گرفتن N صفحه ثابت از کل محدوده.
+    """
+    def one(cell):
+        box, count = cell
+        pages = -(-count // 24) + 1  # سقف، به‌علاوه یکی برای اطمینان
+        fd = dict(form_data)
+        fd["bbox"] = {"repeated_float": {"value": [{"value": float(v)} for v in box]}}
+        return search(city_ids, fd, pages=pages, delay=0)
+
+    exact = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for rows in pool.map(one, leaves):
+            for r in rows:
+                if r.get("token"):
+                    exact.setdefault(r["token"], r)
+    return exact
 
 
 # دیوار بعد از حدود ۳۰ درخواست جزئیات، 429 می‌دهد

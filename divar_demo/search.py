@@ -1,11 +1,11 @@
-"""موتور جستجو — یک تابع که هم CLI و هم پنل وب صدایش می‌زنند.
+"""موتور جستجو — یک تابع که CLI، پنل وب و اطلاع‌رسانی صدایش می‌زنند.
 
 جریان:
     فیلترها → جستجوی نقشه‌ای (متراژ/اتاق/سن/امکانات/مختصات)
-            → join با لیست برای قیمت دقیق
+            → join با لیست برای قیمت دقیق، به ازای هر خانه نقشه
             → فیلتر چندضلعی
             → رهن معادل و فیلتر قطعی
-            → مقایسه با median
+            → مقایسه با median و امتیاز
 """
 
 from . import collector, geo, listing
@@ -13,9 +13,6 @@ from .store import Store
 
 CITIES = {"tehran": "1", "mashhad": "2", "isfahan": "3",
           "karaj": "4", "shiraz": "5", "tabriz": "6"}
-
-# چند صفحه لیست برای گرفتن قیمت دقیق. هر صفحه ۲۴ آگهی.
-PRICE_JOIN_PAGES = 40
 
 
 def _ranges(size=None, credit_max=None, rent_max=None, age_max=None,
@@ -36,6 +33,39 @@ def _ranges(size=None, credit_max=None, rent_max=None, age_max=None,
         out["floors_count"] = (None, floors_count_max)
     if units_per_floor_max:
         out["unit_per_floor"] = (None, units_per_floor_max)
+    return out
+
+
+def params_from_request(data):
+    """شکل درخواست پنل (size_min/size_max/…) → آرگومان‌های run_search.
+
+    تنها جایی که این تبدیل انجام می‌شود. پنل و اطلاع‌رسانی هر دو از همین استفاده
+    می‌کنند تا پارامترهای ذخیره‌شده همیشه قابل اجرا بمانند. کلیدهای ناشناخته
+    (مثل refresh) نادیده گرفته می‌شوند.
+    """
+    d = dict(data or {})
+    size_min, size_max = d.pop("size_min", None), d.pop("size_max", None)
+    floor_min, floor_max = d.pop("floor_min", None), d.pop("floor_max", None)
+    d.pop("refresh", None)
+
+    out = {
+        "city": d.pop("city", None) or "tehran",
+        "polygon": [tuple(p) for p in d.pop("polygon", None) or []] or None,
+        "district_ids": [str(x) for x in d.pop("district_ids", None) or []] or None,
+        "size": (size_min, size_max) if (size_min or size_max) else None,
+        "floor": (floor_min, floor_max) if (floor_min or floor_max) else None,
+    }
+    for key in ("heating_system", "cooling_system"):
+        val = d.pop(key, None)
+        out[key] = [val] if isinstance(val, str) and val else (val or None)
+
+    # اگر شکل قدیمی (size به‌صورت جفت) ذخیره شده بود، همان را نگه دار
+    if d.get("size") and out["size"] is None:
+        out["size"] = tuple(d["size"])
+    d.pop("size", None)
+
+    allowed = set(run_search.__kwdefaults__ or {})
+    out.update({k: v for k, v in d.items() if k in allowed})
     return out
 
 
@@ -76,8 +106,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
     if polygon and not bbox:
         bbox = geo.bbox_of(polygon)
     elif not bbox and district_ids:
-        # محله هم bbox دارد — از مسیر سریع نقشه استفاده کن.
-        # فیلتر دقیق محله همچنان در form_data سمت دیوار می‌ماند.
+        # محله هم bbox دارد — مسیر سریع نقشه. فیلتر دقیق محله سمت دیوار می‌ماند.
         bbox = geo.districts_bbox(district_ids, city)
     elif not bbox:
         bbox = geo.city_bbox(city)
@@ -85,43 +114,20 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
 
     form_data = collector.build_form_data(
         ranges=ranges, rooms_min=rooms_min, booleans=booleans,
-        owner_only=owner_only, districts=district_ids,
-        choices=choices,
-        bbox=None,  # bbox فقط برای مسیر لیست لازم است، نه نقشه
-    )
+        owner_only=owner_only, districts=district_ids, choices=choices)
 
     # --- مرحله ۱: نقشه ---
-    if bbox:
-        note("جستجوی نقشه‌ای ...")
-        total, by_token, complete = collector.search_map_area(
-            city_ids, form_data, bbox,
-            on_progress=lambda d, l, f, t: note(f"خانه {d} (مانده {l}) — {f} از {t} آگهی"))
-        items = list(by_token.values())
-        if not complete:
-            note(f"پوشش ناقص: {len(items)} از {total} آگهی — محدوده را کوچک‌تر کنید")
-    else:
-        # بدون محدوده: مسیر قدیمی لیست + جزئیات (کندتر، ولی محدوده‌ای نداریم)
-        note("جستجوی لیستی ...")
-        rows = collector.search(city_ids, form_data, pages=4)
-        by_token = {r["token"]: r for r in rows if r.get("token")}
-        note(f"{len(by_token)} آگهی — گرفتن جزئیات")
-        items = []
-        for detail in collector.fetch_details(list(by_token)):
-            if "error" in detail:
-                continue
-            items.append(listing.normalize(by_token[detail["token"]], detail, rate=rate))
-        total = len(items)
-        return _finish(items, total, rate, note, districts=[], store=store,
-                       complete=True, **local)
+    note("جستجوی نقشه‌ای ...")
+    total, by_token, complete, leaves = collector.search_map_area(
+        city_ids, form_data, bbox,
+        on_progress=lambda d, l, f, t: note(f"خانه {d} (مانده {l}) — {f} از {t} آگهی"))
+    items = list(by_token.values())
+    if not complete:
+        note(f"پوشش ناقص: {len(items)} از {total} آگهی — محدوده را کوچک‌تر کنید")
 
-    # --- مرحله ۲: قیمت دقیق از لیست ---
-    note("گرفتن قیمت دقیق ...")
-    list_form = collector.build_form_data(
-        ranges=ranges, rooms_min=rooms_min, booleans=booleans,
-        owner_only=owner_only, choices=choices, districts=district_ids, bbox=bbox)
-    exact = {r["token"]: r for r in collector.search(city_ids, list_form,
-                                                     pages=PRICE_JOIN_PAGES, delay=0)
-             if r.get("token")}
+    # --- مرحله ۲: قیمت دقیق، به ازای هر خانه ---
+    note(f"گرفتن قیمت دقیق از {len(leaves)} خانه ...")
+    exact = collector.exact_prices_for_cells(city_ids, form_data, leaves)
     note(f"قیمت دقیق برای {len(exact)} از {len(items)} آگهی")
 
     # --- مرحله ۳: نرمال‌سازی ---
@@ -175,7 +181,6 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
             kept = [i for i in kept if i.get("token") not in trashed]
             note(f"سطل آشغال: {before - len(kept)} مورد پنهان شد")
 
-    # فاصله تا نزدیک‌ترین مترو
     city_name = filters.get("city", "tehran")
     for item in kept:
         name, dist = geo.nearest_metro(item.get("lat"), item.get("lon"), city_name)
@@ -203,19 +208,19 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
         item["bookmarked"] = item.get("token") in bookmarked
 
     kept.sort(key=lambda i: -(i.get("score") or 0))
-
-    # شمارش دیوار روی ۱۰۰۰۰ اشباع می‌شود؛ گاهی بیشتر از آن جمع می‌کنیم
     rounded = sum(1 for i in kept if i.get("price_is_rounded"))
 
     return {
         "results": [i for i in kept if not i.get("suspicious")],
         "suspicious": [i for i in kept if i.get("suspicious")],
         "median_per_meter": median,
+        # شمارش دیوار روی ۱۰۰۰۰ اشباع می‌شود؛ گاهی بیشتر از آن جمع می‌کنیم
         "divar_count": max(total, len(items)),
         "divar_count_saturated": total >= 10000,
         "price_rounded_count": rounded,
         "collected": len(items),
         "districts_in_region": districts,
         "complete": complete,
+        "weights": {**listing.DEFAULT_WEIGHTS, **(weights or {})},
         "rate": rate,
     }

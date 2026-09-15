@@ -158,35 +158,13 @@ async def run(req: SearchRequest, background: BackgroundTasks):
             return {**cached, "from_cache": True,
                     "cache_age_s": round(time.monotonic() - stamp)}
 
-    polygon = [(p[0], p[1]) for p in req.polygon] if req.polygon else None
-    size = (req.size_min, req.size_max) if (req.size_min or req.size_max) else None
+    # تبدیل در یک جا (search.params_from_request) تا پارامترهای ذخیره‌شده
+    # همیشه با همان منطق اجرا شوند — پنل و اطلاع‌رسانی یکسان.
+    kwargs = search.params_from_request(req.model_dump())
 
     def work():
         with Store() as store:
-            return search.run_search(
-                city=req.city, polygon=polygon,
-                district_ids=[str(d) for d in req.district_ids] or None,
-                size=size, rooms_min=req.rooms_min,
-                credit_max=req.credit_max, rent_max=req.rent_max,
-                parking=req.parking, elevator=req.elevator,
-                storage=req.storage, owner_only=req.owner_only,
-                real_photos=req.real_photos, has_video=req.has_video,
-                balcony=req.balcony, rebuilt=req.rebuilt,
-                recent_ads=req.recent_ads, toilet=req.toilet,
-                heating_system=[req.heating_system] if req.heating_system else None,
-                cooling_system=[req.cooling_system] if req.cooling_system else None,
-                age_max=req.age_max,
-                floor=(req.floor_min, req.floor_max)
-                      if (req.floor_min or req.floor_max) else None,
-                floors_count_max=req.floors_count_max,
-                units_per_floor_max=req.units_per_floor_max,
-                max_fre=req.max_fre, max_fre_per_meter=req.max_fre_per_meter,
-                min_images=req.min_images,
-                convertible_only=req.convertible_only,
-                below_median_only=req.below_median_only,
-                hide_roommate=req.hide_roommate,
-                store=store,
-            )
+            return search.run_search(store=store, **kwargs)
 
     async with search_lock:
         result = await asyncio.to_thread(work)
@@ -211,8 +189,6 @@ class SaveRequest(BaseModel):
 
 @app.get("/api/searches")
 def searches():
-    from divar_demo import config
-
     with Store() as store:
         rows = store.list_searches()
     return {
@@ -261,6 +237,7 @@ def add_mark(kind: str, req: MarkRequest):
         raise HTTPException(400, "نوع نامعتبر")
     with Store() as store:
         store.mark(req.token, kind, req.note)
+    _search_cache.clear()  # نتیجه کش‌شده دیگر با علامت‌ها همخوان نیست
     return {"ok": True}
 
 
@@ -271,6 +248,7 @@ def remove_mark(kind: str, token: str):
         raise HTTPException(400, "نوع نامعتبر")
     with Store() as store:
         store.unmark(token, kind)
+    _search_cache.clear()
     return {"ok": True}
 
 

@@ -4,13 +4,26 @@ const fa = (n) => (n == null ? "—" : n.toLocaleString("fa-IR"));
 const million = (v) => (v == null ? "—" : fa(Math.round(v / 1e6)));
 const pct = (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${fa(Math.round(v))}٪`);
 
+// متن آگهی محتوای کاربر غریبه است — هیچ‌وقت خام در innerHTML نرود
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+  );
+
+const SCORE_BASE = 50;
+const WEIGHT_LABELS = { deal: "قیمت", age: "نوسازی", metro: "مترو" };
+
 let state = {
   polygon: null,
   districts: [], // {id, name}
   results: [],
-  sortKey: "fre_per_meter",
-  sortAsc: true,
+  weights: { deal: 30, age: 15, metro: 10 },
+  sortKey: "score",
+  sortAsc: false,
   markers: null,
+  markerByToken: new Map(),
+  tab: "results",
+  lastPayload: null,
 };
 
 /* ---------- نقشه ---------- */
@@ -41,9 +54,7 @@ map.addControl(
 map.on(L.Draw.Event.CREATED, (e) => {
   drawnItems.clearLayers();
   drawnItems.addLayer(e.layer);
-  state.polygon = e.layer
-    .getLatLngs()[0]
-    .map((p) => [p.lng, p.lat]);
+  state.polygon = e.layer.getLatLngs()[0].map((p) => [p.lng, p.lat]);
   setProgress(`محدوده انتخاب شد (${fa(state.polygon.length)} نقطه)`);
 });
 
@@ -94,7 +105,7 @@ function renderChips() {
     const chip = document.createElement("span");
     chip.className =
       "inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-theme-xs text-brand-600 dark:bg-brand-500/15 dark:text-brand-400";
-    chip.innerHTML = `${d.name} <button type="button" class="text-brand-400 hover:text-error-500">✕</button>`;
+    chip.innerHTML = `${esc(d.name)} <button type="button" class="text-brand-400 hover:text-error-500">✕</button>`;
     chip.querySelector("button").onclick = () => {
       state.districts = state.districts.filter((x) => x.id !== d.id);
       renderChips();
@@ -113,14 +124,53 @@ document.querySelectorAll(".room-btn").forEach((btn) => {
   };
 });
 
+/* ---------- وزن معیارها (بازمحاسبه سمت مرورگر، بدون سرور) ---------- */
+
+document.querySelectorAll("input[data-weight]").forEach((slider) => {
+  const key = slider.dataset.weight;
+  const label = document.querySelector(`[data-weight-value="${key}"]`);
+  const sync = () => {
+    state.weights[key] = Number(slider.value);
+    if (label) label.textContent = fa(Number(slider.value));
+  };
+  sync();
+  slider.addEventListener("input", () => {
+    sync();
+    rescore();
+    if (state.tab === "results") renderTable();
+  });
+});
+
+function rescore() {
+  for (const r of state.results) {
+    const f = r.score_factors ?? {};
+    let total = SCORE_BASE;
+    const parts = {};
+    for (const [k, v] of Object.entries(f)) {
+      parts[k] = Math.round(v * (state.weights[k] ?? 0) * 10) / 10;
+      total += parts[k];
+    }
+    r.score = Math.round(Math.max(0, Math.min(100, total)) * 10) / 10;
+    r.score_parts = parts;
+  }
+}
+
 /* ---------- اجرای جستجو ---------- */
 
 const form = document.getElementById("filters");
 const runBtn = document.getElementById("run-btn");
 const progressEl = document.getElementById("progress");
+const loadingEl = document.getElementById("loading");
 
 function setProgress(text) {
   progressEl.textContent = text || "";
+}
+
+function setLoading(on) {
+  loadingEl.classList.toggle("hidden", !on);
+  runBtn.disabled = on;
+  runBtn.textContent = on ? "در حال جستجو ..." : "جستجو";
+  document.getElementById("refresh-btn").disabled = on;
 }
 
 let forceRefresh = false;
@@ -136,6 +186,7 @@ form.addEventListener("submit", async (e) => {
     const v = data.get(k);
     return v ? Number(v) : null;
   };
+  const on = (k) => data.get(k) === "on";
 
   const payload = {
     polygon: state.polygon,
@@ -146,16 +197,16 @@ form.addEventListener("submit", async (e) => {
     // کاربر میلیون وارد می‌کند، API تومان می‌خواهد
     credit_max: num("credit_max") ? num("credit_max") * 1e6 : null,
     rent_max: num("rent_max") ? num("rent_max") * 1e6 : null,
-    parking: data.get("parking") === "on",
-    elevator: data.get("elevator") === "on",
-    storage: data.get("storage") === "on",
-    owner_only: data.get("owner_only") === "on",
-    real_photos: data.get("real_photos") === "on",
-    has_video: data.get("has_video") === "on",
+    parking: on("parking"),
+    elevator: on("elevator"),
+    storage: on("storage"),
+    owner_only: on("owner_only"),
+    real_photos: on("real_photos"),
+    has_video: on("has_video"),
 
     // فیلترهای بیشتر — همه اختیاری؛ خالی یعنی اعمال نشود
-    balcony: data.get("balcony") === "on",
-    rebuilt: data.get("rebuilt") === "on",
+    balcony: on("balcony"),
+    rebuilt: on("rebuilt"),
     recent_ads: data.get("recent_ads") || null,
     toilet: data.get("toilet") || null,
     heating_system: data.get("heating_system") || null,
@@ -168,16 +219,18 @@ form.addEventListener("submit", async (e) => {
     max_fre: num("max_fre") ? num("max_fre") * 1e6 : null,
     max_fre_per_meter: num("max_fre_per_meter") ? num("max_fre_per_meter") * 1e6 : null,
     min_images: num("min_images"),
-    convertible_only: data.get("convertible_only") === "on",
-    below_median_only: data.get("below_median_only") === "on",
-    hide_roommate: data.get("hide_roommate") === "on",
+    convertible_only: on("convertible_only"),
+    below_median_only: on("below_median_only"),
+    hide_roommate: on("hide_roommate"),
+    // وزن‌ها برای اطلاع‌رسانی ذخیره می‌شوند؛ پنل خودش بازمحاسبه می‌کند
+    weights: { ...state.weights },
     refresh: forceRefresh,
   };
 
   state.lastPayload = payload;
-  runBtn.disabled = true;
-  runBtn.textContent = "در حال جستجو ...";
-  setProgress("شروع ...");
+  setLoading(true);
+  setProgress("");
+  showTab("results");
 
   try {
     const res = await fetch("/api/search", {
@@ -186,16 +239,13 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
-    const out = await res.json();
-    render(out);
-    setProgress("");
+    render(await res.json());
     saveBtn.disabled = false;
   } catch (err) {
     setProgress(`خطا: ${err.message}`);
   } finally {
     forceRefresh = false;
-    runBtn.disabled = false;
-    runBtn.textContent = "جستجو";
+    setLoading(false);
   }
 });
 
@@ -247,7 +297,7 @@ async function loadSaved() {
     const row = document.createElement("div");
     row.className =
       "flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-theme-xs text-gray-700 dark:border-gray-700 dark:text-gray-400";
-    row.innerHTML = `<span>${s.name}</span><button type="button" class="text-gray-400 hover:text-error-500">✕</button>`;
+    row.innerHTML = `<span>${esc(s.name)}</span><button type="button" class="text-gray-400 hover:text-error-500">✕</button>`;
     row.querySelector("button").onclick = async () => {
       await fetch(`/api/searches/${s.id}`, { method: "DELETE" });
       loadSaved();
@@ -256,12 +306,11 @@ async function loadSaved() {
   });
 }
 
-loadSaved();
-
 /* ---------- نمایش نتایج ---------- */
 
 function render(out) {
   state.results = out.results;
+  rescore();
 
   document.getElementById("stat-count").textContent = fa(out.divar_count);
   document.getElementById("stat-median").textContent =
@@ -282,23 +331,21 @@ function render(out) {
   });
 
   const note = document.getElementById("result-note");
+  const warnings = [];
+  if (out.complete === false) warnings.push("پوشش ناقص — محدوده را کوچک‌تر کنید یا فیلتر بگذارید");
+  if (out.price_rounded_count > 0) warnings.push(`قیمت ${fa(out.price_rounded_count)} آگهی گرد شده است`);
+  if (out.from_cache) {
+    warnings.push(`از کش، ${out.cache_age_s < 60 ? `${fa(out.cache_age_s)} ثانیه` : "بیش از یک دقیقه"} پیش`);
+  }
   note.textContent =
-    `${fa(out.results.length)} آگهی پس از فیلترها — از ${fa(out.collected)} جمع‌آوری‌شده`;
-  note.className = out.complete === false
+    `${fa(out.results.length)} آگهی از ${fa(out.collected)} جمع‌آوری‌شده` +
+    (warnings.length ? ` — ${warnings.join(" · ")}` : "");
+  note.className = warnings.length && !out.from_cache
     ? "text-theme-xs text-warning-600 dark:text-warning-400"
     : "text-theme-xs text-gray-500 dark:text-gray-400";
-  if (out.complete === false) {
-    note.textContent += " — پوشش ناقص، محدوده را کوچک‌تر کنید یا فیلتر بیشتری بگذارید";
-  }
-  if (out.from_cache) {
-    note.textContent +=
-      ` — از کش، ${out.cache_age_s < 60 ? `${fa(out.cache_age_s)} ثانیه` : "بیش از یک دقیقه"} پیش`;
-  }
-  if (out.price_rounded_count > 0) {
-    note.className = "text-theme-xs text-warning-600 dark:text-warning-400";
-    note.textContent +=
-      ` — قیمت ${fa(out.price_rounded_count)} آگهی گرد شده است (دقیق نیست)`;
-  }
+
+  const countEl = document.querySelector('[data-count="results"]');
+  if (countEl) countEl.textContent = fa(out.results.length);
 
   renderTable();
   renderMarkers();
@@ -310,7 +357,7 @@ function render(out) {
     suspList.innerHTML = out.suspicious
       .map(
         (r) =>
-          `<div>متری ${million(r.fre_per_meter)}م · ${fa(r.size)}م² · <a class="text-brand-500 hover:underline" href="${r.url}" target="_blank" rel="noopener">${r.title ?? ""}</a></div>`
+          `<div>متری ${million(r.fre_per_meter)}م · ${fa(r.size)}م² · <a class="text-brand-500 hover:underline" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>`
       )
       .join("");
   } else {
@@ -318,9 +365,22 @@ function render(out) {
   }
 }
 
+// برای این ستون‌ها «بیشتر = بهتر»، پس اولین کلیک نزولی باشد
+const DESC_FIRST = new Set(["score", "year_built", "image_count"]);
+
+function scorePill(score) {
+  const cls =
+    score >= 80 ? "bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-400"
+    : score >= 60 ? "bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400"
+    : score >= 40 ? "bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300"
+    : "bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-400";
+  return `<span class="inline-block min-w-11 rounded-full px-2 py-0.5 text-center text-theme-sm font-bold ${cls}">${fa(score)}</span>`;
+}
+
 function renderTable() {
   const body = document.getElementById("results-body");
   const empty = document.getElementById("empty-state");
+  empty.textContent = "محدوده‌ای بکشید یا محله‌ای انتخاب کنید، سپس «جستجو» بزنید.";
 
   const rows = [...state.results].sort((a, b) => {
     const x = a[state.sortKey], y = b[state.sortKey];
@@ -329,57 +389,62 @@ function renderTable() {
     return state.sortAsc ? x - y : y - x;
   });
 
+  document.querySelectorAll("#table-head th[data-sort]").forEach((th) => {
+    const active = th.dataset.sort === state.sortKey;
+    th.classList.toggle("text-brand-500", active);
+    const arrow = th.querySelector(".sort-arrow");
+    if (arrow) arrow.textContent = active ? (state.sortAsc ? "↑" : "↓") : "";
+  });
+
   empty.classList.toggle("hidden", rows.length > 0);
   body.innerHTML = rows
     .map((r, i) => {
       const deal =
-        r.vs_market_pct == null
-          ? ""
-          : r.vs_market_pct < -10
-            ? "text-success-600"
-            : r.vs_market_pct > 10
-              ? "text-error-500"
-              : "text-gray-500";
+        r.vs_market_pct == null ? "text-gray-400"
+        : r.vs_market_pct < -10 ? "text-success-600 font-medium"
+        : r.vs_market_pct > 10 ? "text-error-500"
+        : "text-gray-500";
       const photo =
         r.real_photos === false
-          ? '<span class="text-warning-600" title="آگهی‌دهنده گفته عکس‌ها مال این ملک نیست">تزئینی</span>'
+          ? '<span class="tag tag-warn" title="آگهی‌دهنده گفته عکس‌ها مال این ملک نیست">تزئینی</span>'
           : r.real_photos === true
-            ? '<span class="text-success-600">واقعی</span>'
-            : `${fa(r.image_count ?? 0)} عکس`;
+            ? '<span class="tag tag-ok">عکس واقعی</span>'
+            : `<span class="tag">${fa(r.image_count ?? 0)} عکس</span>`;
       const amen = [
-        r.parking ? "پارکینگ" : null,
-        r.elevator ? "آسانسور" : null,
-        r.storage ? "انباری" : null,
-      ].filter(Boolean).join(" · ") || "—";
+        r.parking ? '<span class="tag tag-ok">پارکینگ</span>' : "",
+        r.elevator ? '<span class="tag tag-ok">آسانسور</span>' : "",
+        r.storage ? '<span class="tag tag-ok">انباری</span>' : "",
+      ].join("");
       const change =
         r.price_change_pct == null || Math.abs(r.price_change_pct) < 0.5
-          ? "—"
+          ? '<span class="text-gray-300">—</span>'
           : `<span class="${r.price_change_pct < 0 ? "text-success-600" : "text-error-500"}">${pct(r.price_change_pct)}</span>`;
       const badge = r.is_new
-        ? '<span class="me-1.5 rounded-full bg-success-50 px-2 py-0.5 text-theme-xs text-success-700 dark:bg-success-500/15 dark:text-success-400">جدید</span>'
+        ? '<span class="tag tag-new me-1">جدید</span>'
         : "";
       const metro = r.metro_distance_m == null
         ? "—"
-        : `${fa(r.metro_distance_m)}م<span class="text-gray-400"> ${r.metro_name ?? ""}</span>`;
+        : `<span class="${r.metro_distance_m <= 800 ? "text-success-600" : ""}">${fa(r.metro_distance_m)}م</span>
+           <span class="block text-theme-xs text-gray-400">${esc(r.metro_name)}</span>`;
       const scoreTitle = Object.entries(r.score_parts ?? {})
-        .map(([k, v]) => `${({deal: "قیمت", age: "نوسازی", metro: "مترو"})[k] ?? k}: ${v > 0 ? "+" : ""}${v}`)
+        .map(([k, v]) => `${WEIGHT_LABELS[k] ?? k}: ${v > 0 ? "+" : ""}${v}`)
         .join(" · ");
-      return `<tr data-idx="${i}" class="border-b border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-white/3">
-        <td class="td font-bold" title="پایه ۵۰ — ${scoreTitle}">${fa(r.score)}</td>
-        <td class="td font-medium">${million(r.fre_per_meter)}</td>
-        <td class="td">${million(r.full_rent_equivalent)}</td>
+      return `<tr data-idx="${i}" data-token="${esc(r.token)}" class="row cursor-pointer border-b border-gray-100 transition hover:bg-brand-50/40 dark:border-gray-800 dark:hover:bg-white/3">
+        <td class="td" title="پایه ۵۰ — ${esc(scoreTitle)}">${scorePill(r.score)}</td>
+        <td class="td font-semibold">${million(r.fre_per_meter)}</td>
+        <td class="td">${million(r.full_rent_equivalent)}
+          <span class="block text-theme-xs text-gray-400">${million(r.deposit)} + ${million(r.monthly_rent)}</span></td>
         <td class="td ${deal}">${pct(r.vs_market_pct)}</td>
-        <td class="td">${fa(r.size)}</td>
-        <td class="td">${fa(r.rooms)}</td>
-        <td class="td">${fa(r.year_built)}</td>
-        <td class="td text-theme-xs">${amen}</td>
-        <td class="td text-theme-xs">${photo}</td>
+        <td class="td">${fa(r.size)}م² · ${fa(r.rooms)}خ
+          <span class="block text-theme-xs text-gray-400">ساخت ${fa(r.year_built)}</span></td>
+        <td class="td"><div class="flex flex-wrap gap-1">${amen}${photo}</div></td>
         <td class="td text-theme-xs">${metro}</td>
         <td class="td">${change}</td>
-        <td class="td">${badge}<a class="text-brand-500 hover:underline" href="${r.url}" target="_blank" rel="noopener">${(r.title ?? "").slice(0, 34)}</a></td>
+        <td class="td max-w-64">${badge}<a class="text-gray-800 hover:text-brand-500 dark:text-white/90" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(r.title)}">${esc((r.title ?? "").slice(0, 40))}</a>
+          <span class="block text-theme-xs text-gray-400">${esc(r.district ?? "")}</span></td>
         <td class="td whitespace-nowrap">
-          <button type="button" data-act="bookmark" data-token="${r.token}" class="row-action ${r.bookmarked ? "text-warning-500" : ""}" title="بوکمارک">${r.bookmarked ? "★" : "☆"}</button>
-          <button type="button" data-act="trash" data-token="${r.token}" class="row-action hover:text-error-500" title="حذف به سطل آشغال">🗑</button>
+          <button type="button" data-act="bookmark" data-token="${esc(r.token)}" class="row-action ${r.bookmarked ? "text-warning-500" : ""}" title="بوکمارک">${r.bookmarked ? "★" : "☆"}</button>
+          <button type="button" data-act="trash" data-token="${esc(r.token)}" class="row-action hover:text-error-500" title="حذف به سطل آشغال">🗑</button>
         </td>
       </tr>`;
     })
@@ -403,7 +468,7 @@ function renderTable() {
       } else {
         const r = state.results.find((x) => x.token === token);
         const on = !r?.bookmarked;
-        await fetch(on ? "/api/marks/bookmark" : `/api/marks/bookmark/${token}`, {
+        await fetch(on ? "/api/marks/bookmark" : `/api/marks/bookmark/${encodeURIComponent(token)}`, {
           method: on ? "POST" : "DELETE",
           headers: { "Content-Type": "application/json" },
           body: on ? JSON.stringify({ token }) : undefined,
@@ -416,16 +481,28 @@ function renderTable() {
   });
 
   body.querySelectorAll("tr[data-idx]").forEach((tr) => {
+    const r = rows[Number(tr.dataset.idx)];
     tr.onclick = (e) => {
       if (e.target.tagName === "A" || e.target.dataset.act) return;
-      const r = rows[Number(tr.dataset.idx)];
       if (r.lat) map.setView([r.lat, r.lon], 16);
       toggleDetail(tr, r);
     };
+    // ردیف ↔ پین: hover روی ردیف، پین را برجسته می‌کند
+    tr.onmouseenter = () => highlightMarker(r.token, true);
+    tr.onmouseleave = () => highlightMarker(r.token, false);
   });
 }
 
+function highlightMarker(token, on) {
+  const m = state.markerByToken.get(token);
+  if (!m) return;
+  m.setStyle({ radius: on ? 11 : 6, weight: on ? 3 : 1, fillOpacity: on ? 1 : 0.7 });
+  if (on) m.bringToFront();
+}
+
 /* ---------- جزئیات تنبل ---------- */
+
+const COLS = 10;
 
 async function toggleDetail(tr, r) {
   const next = tr.nextElementSibling;
@@ -437,70 +514,89 @@ async function toggleDetail(tr, r) {
 
   const row = document.createElement("tr");
   row.className = "detail-row bg-gray-50 dark:bg-white/3";
-  row.innerHTML = `<td colspan="13" class="px-4 py-3 text-theme-sm text-gray-500">در حال گرفتن جزئیات ...</td>`;
+  row.innerHTML = `<td colspan="${COLS}" class="px-4 py-3 text-theme-sm text-gray-500">در حال گرفتن جزئیات ...</td>`;
   tr.after(row);
 
   try {
-    const res = await fetch(`/api/post/${r.token}`);
+    const res = await fetch(`/api/post/${encodeURIComponent(r.token)}`);
     if (!res.ok) throw new Error("جزئیات در دسترس نیست");
     const d = await res.json();
     const f = d.fields || {};
     const feats = Object.entries(d.features || {})
-      .map(([k, v]) => `${k}: ${v ? "دارد" : "ندارد"}`)
-      .join(" · ");
-    row.innerHTML = `<td colspan="13" class="px-4 py-4">
-      <div class="grid gap-3 md:grid-cols-3">
-        <div class="text-theme-sm text-gray-700 dark:text-gray-300">
-          <div><b>طبقه:</b> ${f["طبقه"] ?? "—"}</div>
-          <div><b>ساخت:</b> ${f["ساخت"] ?? "—"}</div>
-          <div><b>ودیعه و اجاره:</b> ${f["ودیعه و اجاره"] ?? "—"}</div>
+      .map(([k, v]) => `<span class="tag ${v ? "tag-ok" : ""}">${esc(k)}${v ? "" : " ✕"}</span>`)
+      .join("");
+    const img = r.image_url
+      ? `<img src="${esc(r.image_url)}" alt="" class="h-28 w-40 rounded-lg object-cover" loading="lazy" />`
+      : "";
+    row.innerHTML = `<td colspan="${COLS}" class="px-4 py-4">
+      <div class="flex flex-col gap-4 md:flex-row">
+        ${img}
+        <div class="grid flex-1 gap-3 md:grid-cols-3">
+          <div class="text-theme-sm text-gray-700 dark:text-gray-300">
+            <div><b>طبقه:</b> ${esc(f["طبقه"] ?? "—")}</div>
+            <div><b>ساخت:</b> ${esc(f["ساخت"] ?? "—")}</div>
+            <div><b>ودیعه و اجاره:</b> ${esc(f["ودیعه و اجاره"] ?? "—")}</div>
+            <div><b>عکس‌ها:</b> ${esc(f["تصویر‌ها برای همین ملک است؟"] ?? "—")}</div>
+          </div>
+          <div class="flex flex-wrap content-start gap-1">${feats || "—"}</div>
+          <div class="text-theme-xs leading-6 whitespace-pre-line text-gray-600 dark:text-gray-400">${esc((d.description ?? "").slice(0, 500))}</div>
         </div>
-        <div class="text-theme-xs text-gray-600 dark:text-gray-400">${feats || "—"}</div>
-        <div class="text-theme-xs leading-6 whitespace-pre-line text-gray-600 dark:text-gray-400">${(d.description ?? "").slice(0, 400)}</div>
       </div>
     </td>`;
   } catch (err) {
-    row.innerHTML = `<td colspan="13" class="px-4 py-3 text-theme-sm text-error-500">${err.message}</td>`;
+    row.innerHTML = `<td colspan="${COLS}" class="px-4 py-3 text-theme-sm text-error-500">${esc(err.message)}</td>`;
   }
 }
 
 function renderMarkers() {
   state.markers.clearLayers();
+  state.markerByToken.clear();
   state.results.forEach((r) => {
     if (!r.lat) return;
     const color =
-      r.vs_market_pct == null
-        ? "#98a2b3"
-        : r.vs_market_pct < -15
-          ? "#12b76a"
-          : r.vs_market_pct > 15
-            ? "#f04438"
-            : "#f79009";
-    L.circleMarker([r.lat, r.lon], {
-      radius: 6,
-      color,
-      fillColor: color,
-      fillOpacity: 0.7,
-      weight: 1,
+      r.vs_market_pct == null ? "#98a2b3"
+      : r.vs_market_pct < -15 ? "#12b76a"
+      : r.vs_market_pct > 15 ? "#f04438"
+      : "#f79009";
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 6, color, fillColor: color, fillOpacity: 0.7, weight: 1,
     })
       .bindPopup(
         `<div style="font-family:Vazirmatn,Tahoma;direction:rtl;text-align:right">
-          <b>${r.title ?? ""}</b><br>
-          متری ${million(r.fre_per_meter)}م · ${fa(r.size)}م² · ${fa(r.rooms)} خواب<br>
+          <b>${esc(r.title)}</b><br>
+          امتیاز ${fa(r.score)} · متری ${million(r.fre_per_meter)}م · ${fa(r.size)}م² · ${fa(r.rooms)} خواب<br>
           ${pct(r.vs_market_pct)} نسبت به بازار<br>
-          <a href="${r.url}" target="_blank" rel="noopener">دیدن در دیوار</a>
+          <a href="${esc(r.url)}" target="_blank" rel="noopener">دیدن در دیوار</a>
         </div>`
       )
+      .on("click", () => {
+        // پین → ردیف: کلیک روی پین، ردیف را می‌آورد و لحظه‌ای روشن می‌کند
+        const tr = document.querySelector(`tr[data-token="${CSS.escape(r.token)}"]`);
+        if (!tr) return;
+        tr.scrollIntoView({ block: "center", behavior: "smooth" });
+        tr.classList.add("bg-brand-50");
+        setTimeout(() => tr.classList.remove("bg-brand-50"), 1500);
+      })
       .addTo(state.markers);
+    state.markerByToken.set(r.token, m);
   });
 }
 
 document.querySelectorAll("#table-head th[data-sort]").forEach((th) => {
   th.style.cursor = "pointer";
+  if (!th.querySelector(".sort-arrow")) {
+    const arrow = document.createElement("span");
+    arrow.className = "sort-arrow ms-1 text-theme-xs";
+    th.appendChild(arrow);
+  }
   th.onclick = () => {
     const key = th.dataset.sort;
-    state.sortAsc = state.sortKey === key ? !state.sortAsc : true;
-    state.sortKey = key;
+    if (state.sortKey === key) {
+      state.sortAsc = !state.sortAsc;
+    } else {
+      state.sortKey = key;
+      state.sortAsc = !DESC_FIRST.has(key);
+    }
     renderTable();
   };
 });
@@ -517,17 +613,21 @@ async function loadCounts() {
 }
 
 async function showTab(tab) {
+  state.tab = tab;
   document.querySelectorAll(".tab-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.tab === tab)
   );
   const body = document.getElementById("results-body");
   const empty = document.getElementById("empty-state");
+  const head = document.getElementById("table-head");
 
   if (tab === "results") {
+    head.classList.remove("hidden");
     renderTable();
     return;
   }
 
+  head.classList.add("hidden");
   const res = await fetch(`/api/marks/${tab}`);
   const { items } = await res.json();
   empty.classList.toggle("hidden", items.length > 0);
@@ -538,16 +638,17 @@ async function showTab(tab) {
   body.innerHTML = items
     .map(
       (m) => `<tr class="border-b border-gray-100 dark:border-gray-800">
-        <td class="td" colspan="9">
-          <a class="text-brand-500 hover:underline" href="https://divar.ir/v/${m.token}" target="_blank" rel="noopener">${m.title ?? m.token}</a>
-          <span class="text-theme-xs text-gray-400">
-            ${m.district ?? ""} ${m.size ? `· ${fa(m.size)}م²` : ""}
+        <td class="td" colspan="${COLS - 1}">
+          <a class="text-gray-800 hover:text-brand-500 dark:text-white/90" href="https://divar.ir/v/${esc(m.token)}" target="_blank" rel="noopener">${esc(m.title ?? m.token)}</a>
+          <span class="block text-theme-xs text-gray-400">
+            ${esc(m.district ?? "")} ${m.size ? `· ${fa(m.size)}م²` : ""}
             ${m.deposit != null ? `· ودیعه ${million(m.deposit)}م` : ""}
             ${m.monthly_rent != null ? `+ اجاره ${million(m.monthly_rent)}م` : ""}
+            · ${esc((m.marked_at ?? "").slice(0, 10))}
           </span>
         </td>
         <td class="td whitespace-nowrap">
-          <button type="button" data-restore="${m.token}" class="rounded-lg border border-gray-300 px-2.5 py-1 text-theme-xs text-gray-600 hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400">${label}</button>
+          <button type="button" data-restore="${esc(m.token)}" class="rounded-lg border border-gray-300 px-2.5 py-1 text-theme-xs text-gray-600 hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400">${label}</button>
         </td>
       </tr>`
     )
@@ -555,7 +656,7 @@ async function showTab(tab) {
 
   body.querySelectorAll("[data-restore]").forEach((btn) => {
     btn.onclick = async () => {
-      await fetch(`/api/marks/${tab}/${btn.dataset.restore}`, { method: "DELETE" });
+      await fetch(`/api/marks/${tab}/${encodeURIComponent(btn.dataset.restore)}`, { method: "DELETE" });
       await loadCounts();
       showTab(tab);
     };
@@ -566,4 +667,5 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.onclick = () => showTab(btn.dataset.tab);
 });
 
+loadSaved();
 loadCounts();

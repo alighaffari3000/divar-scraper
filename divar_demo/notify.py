@@ -121,11 +121,12 @@ def run_saved_searches(dry_run=False, store_path=None):
             return 0
 
         for row in saved:
-            params = json.loads(row["params_json"])
-            polygon = [tuple(p) for p in params.pop("polygon", None) or []] or None
+            # همان تبدیلی که پنل استفاده می‌کند — پارامتر ذخیره‌شده از پنل
+            # شکل size_min/size_max دارد، نه شکل run_search.
+            kwargs = search.params_from_request(json.loads(row["params_json"]))
             print(f"اجرای «{row['name']}» ...", file=sys.stderr)
 
-            result = search.run_search(polygon=polygon, store=store, **params)
+            result = search.run_search(store=store, **kwargs)
             median = result["median_per_meter"]
             picks = [i for i in result["results"] if worth_sending(i, median)]
             picks = picks[: config.NOTIFY_MAX_ITEMS]

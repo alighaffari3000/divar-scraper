@@ -115,6 +115,30 @@
             </label>
           </div>
 
+          <!-- وزن معیارها — بازمحاسبه فوری، بدون سرور -->
+          <div class="rounded-lg border border-gray-200 px-3 py-3 dark:border-gray-700">
+            <p class="mb-2.5 text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              وزن امتیازدهی
+            </p>
+            <div class="flex flex-col gap-2.5">
+              <label class="flex items-center gap-2 text-theme-xs text-gray-600 dark:text-gray-400">
+                <span class="w-14">قیمت</span>
+                <input type="range" min="0" max="50" value="30" data-weight="deal" class="flex-1 accent-brand-500" />
+                <span data-weight-value="deal" class="w-6 text-end tabular-nums">۳۰</span>
+              </label>
+              <label class="flex items-center gap-2 text-theme-xs text-gray-600 dark:text-gray-400">
+                <span class="w-14">نوسازی</span>
+                <input type="range" min="0" max="50" value="15" data-weight="age" class="flex-1 accent-brand-500" />
+                <span data-weight-value="age" class="w-6 text-end tabular-nums">۱۵</span>
+              </label>
+              <label class="flex items-center gap-2 text-theme-xs text-gray-600 dark:text-gray-400">
+                <span class="w-14">مترو</span>
+                <input type="range" min="0" max="50" value="10" data-weight="metro" class="flex-1 accent-brand-500" />
+                <span data-weight-value="metro" class="w-6 text-end tabular-nums">۱۰</span>
+              </label>
+            </div>
+          </div>
+
           <!-- فیلترهای بیشتر — همه اختیاری، پیش‌فرض خاموش -->
           <div x-data="{ open: false }" class="rounded-lg border border-gray-200 dark:border-gray-700">
             <button type="button" @click="open = !open"
@@ -358,7 +382,9 @@
           <div class="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/3">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
               <div class="flex gap-1.5" id="tabs">
-                <button type="button" data-tab="results" class="tab-btn active">نتایج</button>
+                <button type="button" data-tab="results" class="tab-btn active">
+                  نتایج <span data-count="results" class="tab-count">۰</span>
+                </button>
                 <button type="button" data-tab="bookmark" class="tab-btn">
                   بوکمارک <span data-count="bookmark" class="tab-count">۰</span>
                 </button>
@@ -368,21 +394,22 @@
               </div>
               <span id="result-note" class="text-theme-xs text-gray-500 dark:text-gray-400"></span>
             </div>
+            <div id="loading" class="hidden flex items-center gap-3 border-b border-gray-200 bg-brand-50/50 px-5 py-3 text-theme-sm text-brand-600 dark:border-gray-800 dark:bg-brand-500/10 dark:text-brand-400">
+              <span class="h-4 w-4 animate-spin rounded-full border-2 border-brand-500 border-t-transparent"></span>
+              در حال جستجو در دیوار — معمولاً ۱۰ تا ۲۰ ثانیه
+            </div>
             <div class="overflow-x-auto">
               <table class="min-w-full">
-                <thead class="border-b border-gray-200 dark:border-gray-800">
+                <thead class="sticky top-0 z-10 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
                   <tr id="table-head">
                     <th data-sort="score" class="th">امتیاز</th>
-                    <th data-sort="fre_per_meter" class="th">متری</th>
-                    <th data-sort="full_rent_equivalent" class="th">رهن معادل</th>
-                    <th data-sort="vs_market_pct" class="th">٪ بازار</th>
-                    <th data-sort="size" class="th">متراژ</th>
-                    <th data-sort="rooms" class="th">اتاق</th>
-                    <th data-sort="year_built" class="th">ساخت</th>
+                    <th data-sort="fre_per_meter" class="th" title="رهن کامل معادل به ازای هر متر (میلیون)">متری</th>
+                    <th data-sort="full_rent_equivalent" class="th" title="ودیعه + اجاره × ۳۳٫۳ (میلیون)">رهن معادل</th>
+                    <th data-sort="vs_market_pct" class="th" title="نسبت به median همین جستجو">٪ بازار</th>
+                    <th data-sort="size" class="th">مشخصات</th>
                     <th class="th">امکانات</th>
-                    <th class="th">عکس</th>
                     <th data-sort="metro_distance_m" class="th">مترو</th>
-                    <th data-sort="price_change_pct" class="th">Δ قیمت</th>
+                    <th data-sort="price_change_pct" class="th" title="نسبت به اولین باری که دیده شد">Δ قیمت</th>
                     <th class="th">عنوان</th>
                     <th class="th"></th>
                   </tr>

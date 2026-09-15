@@ -282,24 +282,30 @@ def score_listing(item, weights=None):
     (نه منفی — نباید آگهی را برای نداشتن داده جریمه کنیم).
     """
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
-    parts = {}
+
+    # ضریب خام هر معیار در بازه [-1, 1]؛ وزن جداگانه ضرب می‌شود.
+    # پنل همین ضرایب را می‌گیرد و با وزن‌های اسلایدر، بدون رفتن به سرور،
+    # امتیاز را دوباره حساب می‌کند.
+    factors = {}
 
     vs = item.get("vs_market_pct")
     if vs is not None:
-        # ۳۰٪ زیر بازار = سهم کامل مثبت، ۳۰٪ بالا = سهم کامل منفی
-        parts["deal"] = _clamp(-vs / 30.0) * w["deal"]
+        # ۳۰٪ زیر بازار = ضریب کامل مثبت، ۳۰٪ بالا = ضریب کامل منفی
+        factors["deal"] = _clamp(-vs / 30.0)
 
     age = item.get("age_years")
     if age is not None:
-        parts["age"] = _clamp(1 - 2 * (age / AGE_WORST_YEARS)) * w["age"]
+        factors["age"] = _clamp(1 - 2 * (age / AGE_WORST_YEARS))
 
     metro_m = item.get("metro_distance_m")
     if metro_m is not None:
-        parts["metro"] = _clamp(1 - metro_m / METRO_WORST_METERS, 0, 1) * w["metro"]
+        factors["metro"] = _clamp(1 - metro_m / METRO_WORST_METERS, 0, 1)
 
+    parts = {k: f * w[k] for k, f in factors.items()}
     total = SCORE_BASE + sum(parts.values())
     item["score"] = round(max(0.0, min(100.0, total)), 1)
     item["score_parts"] = {k: round(v, 1) for k, v in parts.items()}
+    item["score_factors"] = {k: round(v, 3) for k, v in factors.items()}
     return item["score"]
 
 
