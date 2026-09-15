@@ -123,6 +123,12 @@ function setProgress(text) {
   progressEl.textContent = text || "";
 }
 
+let forceRefresh = false;
+document.getElementById("refresh-btn").onclick = () => {
+  forceRefresh = true;
+  form.requestSubmit();
+};
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const data = new FormData(form);
@@ -165,6 +171,7 @@ form.addEventListener("submit", async (e) => {
     convertible_only: data.get("convertible_only") === "on",
     below_median_only: data.get("below_median_only") === "on",
     hide_roommate: data.get("hide_roommate") === "on",
+    refresh: forceRefresh,
   };
 
   state.lastPayload = payload;
@@ -186,6 +193,7 @@ form.addEventListener("submit", async (e) => {
   } catch (err) {
     setProgress(`خطا: ${err.message}`);
   } finally {
+    forceRefresh = false;
     runBtn.disabled = false;
     runBtn.textContent = "جستجو";
   }
@@ -281,6 +289,10 @@ function render(out) {
     : "text-theme-xs text-gray-500 dark:text-gray-400";
   if (out.complete === false) {
     note.textContent += " — پوشش ناقص، محدوده را کوچک‌تر کنید یا فیلتر بیشتری بگذارید";
+  }
+  if (out.from_cache) {
+    note.textContent +=
+      ` — از کش، ${out.cache_age_s < 60 ? `${fa(out.cache_age_s)} ثانیه` : "بیش از یک دقیقه"} پیش`;
   }
   if (out.price_rounded_count > 0) {
     note.className = "text-theme-xs text-warning-600 dark:text-warning-400";

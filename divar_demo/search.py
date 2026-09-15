@@ -120,7 +120,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
         ranges=ranges, rooms_min=rooms_min, booleans=booleans,
         owner_only=owner_only, choices=choices, districts=district_ids, bbox=bbox)
     exact = {r["token"]: r for r in collector.search(city_ids, list_form,
-                                                     pages=PRICE_JOIN_PAGES, delay=0.2)
+                                                     pages=PRICE_JOIN_PAGES, delay=0)
              if r.get("token")}
     note(f"قیمت دقیق برای {len(exact)} از {len(items)} آگهی")
 

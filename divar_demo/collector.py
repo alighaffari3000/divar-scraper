@@ -284,8 +284,9 @@ def search_map(city_ids, form_data, bbox, zoom=14):
 MAX_MAP_REQUESTS = 150
 
 
-def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7, delay=0.3,
-                    on_progress=None, max_requests=MAX_MAP_REQUESTS):
+def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7,
+                    on_progress=None, max_requests=MAX_MAP_REQUESTS,
+                    workers=6):
     """محدوده را می‌گیرد و اگر بیش از ۲۰۰ آگهی داشت به چهار ربع تقسیم می‌کند.
 
     بازگشت: (count کل، dict از token به آگهی، complete).
@@ -294,37 +295,51 @@ def search_map_area(city_ids, form_data, bbox, zoom=14, max_depth=7, delay=0.3,
     """
     found = {}
     total = None
-    stack = [(tuple(bbox), 0)]
+    wave = [tuple(bbox)]
     visited = 0
     complete = True
+    depth = 0
 
-    while stack:
-        if visited >= max_requests:
+    # خانه‌های هم‌سطح از هم مستقل‌اند، پس هر موج موازی اجرا می‌شود.
+    # این endpoint محدودیت نرخ ندارد (۱۲۰ درخواست در ۲۵ ثانیه تست شده).
+    while wave and depth <= max_depth:
+        if visited + len(wave) > max_requests:
+            wave = wave[: max(0, max_requests - visited)]
             complete = False
-            break
-        box, depth = stack.pop()
-        count, items = search_map(city_ids, form_data, box, zoom=zoom)
-        visited += 1
-        if total is None:
-            total = count
-        for item in items:
-            if item["token"]:
-                found.setdefault(item["token"], item)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(
+                lambda box: (box, *search_map(city_ids, form_data, box, zoom=zoom)),
+                wave))
+
+        visited += len(results)
+        next_wave = []
+        for box, count, items in results:
+            if total is None:
+                total = count
+            for item in items:
+                if item["token"]:
+                    found.setdefault(item["token"], item)
+            if count > MAP_PAGE_LIMIT and depth < max_depth:
+                min_lon, min_lat, max_lon, max_lat = box
+                mid_lon = (min_lon + max_lon) / 2
+                mid_lat = (min_lat + max_lat) / 2
+                next_wave += [
+                    (min_lon, min_lat, mid_lon, mid_lat),
+                    (mid_lon, min_lat, max_lon, mid_lat),
+                    (min_lon, mid_lat, mid_lon, max_lat),
+                    (mid_lon, mid_lat, max_lon, max_lat),
+                ]
 
         if on_progress:
-            on_progress(visited, len(stack), len(found), total)
+            on_progress(visited, len(next_wave), len(found), total)
+        if not complete:
+            break
+        wave = next_wave
+        depth += 1
 
-        if count > MAP_PAGE_LIMIT and depth < max_depth:
-            min_lon, min_lat, max_lon, max_lat = box
-            mid_lon = (min_lon + max_lon) / 2
-            mid_lat = (min_lat + max_lat) / 2
-            stack.extend([
-                ((min_lon, min_lat, mid_lon, mid_lat), depth + 1),
-                ((mid_lon, min_lat, max_lon, mid_lat), depth + 1),
-                ((min_lon, mid_lat, mid_lon, max_lat), depth + 1),
-                ((mid_lon, mid_lat, max_lon, max_lat), depth + 1),
-            ])
-        time.sleep(delay)
+    if wave and depth > max_depth:
+        complete = False
 
     return total or 0, found, complete
 

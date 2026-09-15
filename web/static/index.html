@@ -273,10 +273,18 @@
             <div id="district-chips" class="mt-2 flex flex-wrap gap-1.5"></div>
           </div>
 
-          <button type="submit" id="run-btn"
-            class="flex h-11 w-full items-center justify-center rounded-lg bg-brand-500 text-theme-sm font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-gray-300">
-            جستجو
-          </button>
+          <div class="flex gap-2">
+            <button type="submit" id="run-btn"
+              class="flex h-11 flex-1 items-center justify-center rounded-lg bg-brand-500 text-theme-sm font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-gray-300">
+              جستجو
+            </button>
+            <button type="button" id="refresh-btn" title="دریافت تازه، بدون کش"
+              class="flex h-11 w-11 items-center justify-center rounded-lg border border-gray-300 text-gray-500 transition hover:border-brand-500 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-400">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M20 9A8 8 0 006.3 5.3M4 15a8 8 0 0013.7 3.7" />
+              </svg>
+            </button>
+          </div>
           <button type="button" id="save-btn" disabled
             class="flex h-11 w-full items-center justify-center rounded-lg border border-gray-300 text-theme-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-400">
             ذخیره برای اطلاع‌رسانی

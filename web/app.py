@@ -4,8 +4,10 @@
 """
 
 import asyncio
+import json
 import os
 import sys
+import time
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -25,6 +27,37 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 # محدودیت نرخ دیوار روی IP ماست، نه روی کاربر — پس در هر لحظه یک جستجو
 search_lock = asyncio.Lock()
+
+# کش نتیجه فقط برای محافظت از دیوار در برابر کلیک‌های پشت‌سرهم است، نه برای سرعت.
+# عمدا خیلی کوتاه: در بازار اجاره تهران آگهی خوب چند ساعته می‌رود، و نتیجه بیات
+# بدتر از نتیجه کند است.
+SEARCH_CACHE_TTL = 120.0
+_search_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _cache_key(req):
+    payload = req.model_dump()
+    payload.pop("refresh", None)
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def _cache_get(key):
+    hit = _search_cache.get(key)
+    if not hit:
+        return None
+    stamp, value = hit
+    if time.monotonic() - stamp > SEARCH_CACHE_TTL:
+        _search_cache.pop(key, None)
+        return None
+    return stamp, value
+
+
+def _cache_put(key, value):
+    _search_cache[key] = (time.monotonic(), value)
+    # کش را کوچک نگه دار — این یک حافظه بلندمدت نیست
+    if len(_search_cache) > 20:
+        oldest = min(_search_cache, key=lambda k: _search_cache[k][0])
+        _search_cache.pop(oldest, None)
 
 
 @app.on_event("startup")
@@ -87,6 +120,7 @@ class SearchRequest(BaseModel):
     convertible_only: bool = False
     below_median_only: bool = False
     hide_roommate: bool = True
+    refresh: bool = False  # کش را دور بزن
 
 
 @app.get("/")
@@ -116,6 +150,14 @@ def _prefetch(tokens):
 
 @app.post("/api/search")
 async def run(req: SearchRequest, background: BackgroundTasks):
+    key = _cache_key(req)
+    if not req.refresh:
+        hit = _cache_get(key)
+        if hit:
+            stamp, cached = hit
+            return {**cached, "from_cache": True,
+                    "cache_age_s": round(time.monotonic() - stamp)}
+
     polygon = [(p[0], p[1]) for p in req.polygon] if req.polygon else None
     size = (req.size_min, req.size_max) if (req.size_min or req.size_max) else None
 
@@ -156,6 +198,9 @@ async def run(req: SearchRequest, background: BackgroundTasks):
     if top_tokens:
         background.add_task(_prefetch, top_tokens)
 
+    result["from_cache"] = False
+    result["cache_age_s"] = 0
+    _cache_put(key, result)
     return result
 
 
