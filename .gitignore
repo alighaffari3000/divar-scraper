@@ -6,3 +6,5 @@ web/static/css/app.css
 web/vendor/
 
 .env
+
+graphify-out/
