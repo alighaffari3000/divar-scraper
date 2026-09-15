@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>رتبه‌بندی آگهی‌های اجاره دیوار</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+  </head>
+  <body
+    x-data="{ page: 'search', loaded: true, darkMode: false, sidebarToggle: false }"
+    x-init="darkMode = JSON.parse(localStorage.getItem('darkMode') ?? 'false');
+            $watch('darkMode', v => localStorage.setItem('darkMode', JSON.stringify(v)))"
+    :class="{'dark bg-gray-900': darkMode === true}"
+  >
+    <div class="flex h-screen overflow-hidden">
+      <!-- سایدبار -->
+      <aside
+        :class="sidebarToggle ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'"
+        class="fixed top-0 right-0 z-9999 flex h-screen w-72.5 flex-col overflow-y-auto border-l border-gray-200 bg-white px-5 transition-all duration-300 xl:static dark:border-gray-800 dark:bg-black"
+      >
+        <div class="flex items-center gap-3 pt-8 pb-7">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500 text-white"
+          >
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v10h14V10" />
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-base font-bold text-gray-800 dark:text-white/90">
+              رتبه‌بندی اجاره
+            </h1>
+            <p class="text-theme-xs text-gray-500 dark:text-gray-400">
+              بر پایه رهن کامل معادل
+            </p>
+          </div>
+        </div>
+
+        <form id="filters" class="flex flex-col gap-5 pb-8">
+          <div>
+            <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              متراژ (متر)
+            </label>
+            <div class="flex items-center gap-2">
+              <input type="number" name="size_min" value="80" placeholder="از"
+                class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90" />
+              <span class="text-gray-400">تا</span>
+              <input type="number" name="size_max" value="150" placeholder="تا"
+                class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90" />
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              حداقل تعداد اتاق
+            </label>
+            <div class="flex gap-1.5" id="rooms-group">
+              <button type="button" data-rooms="" class="room-btn active">همه</button>
+              <button type="button" data-rooms="1" class="room-btn">۱</button>
+              <button type="button" data-rooms="2" class="room-btn">۲</button>
+              <button type="button" data-rooms="3" class="room-btn">۳</button>
+              <button type="button" data-rooms="4" class="room-btn">+۴</button>
+            </div>
+            <input type="hidden" name="rooms_min" value="" />
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              حداکثر ودیعه (میلیون تومان)
+            </label>
+            <input type="number" name="credit_max" placeholder="مثلاً ۱۵۰۰"
+              class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90" />
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              حداکثر اجاره ماهانه (میلیون تومان)
+            </label>
+            <input type="number" name="rent_max" placeholder="مثلاً ۴۰"
+              class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90" />
+          </div>
+
+          <div class="flex flex-col gap-2.5">
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="parking" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              پارکینگ
+            </label>
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="elevator" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              آسانسور
+            </label>
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="storage" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              انباری
+            </label>
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="owner_only" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              فقط مالک (بدون مشاور)
+            </label>
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="real_photos" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              عکس واقعی ملک (نه تزئینی)
+            </label>
+            <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+              <input type="checkbox" name="has_video" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+              ویدیو دارد
+            </label>
+          </div>
+
+          <!-- فیلترهای بیشتر — همه اختیاری، پیش‌فرض خاموش -->
+          <div x-data="{ open: false }" class="rounded-lg border border-gray-200 dark:border-gray-700">
+            <button type="button" @click="open = !open"
+              class="flex w-full items-center justify-between px-3 py-2.5 text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              <span>فیلترهای بیشتر</span>
+              <span x-text="open ? '−' : '+'" class="text-gray-400"></span>
+            </button>
+            <div x-show="open" x-cloak class="flex flex-col gap-4 border-t border-gray-200 px-3 py-4 dark:border-gray-700">
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  تازگی آگهی
+                </label>
+                <select name="recent_ads" class="mini-select">
+                  <option value="">مهم نیست</option>
+                  <option value="3h">۳ ساعت اخیر</option>
+                  <option value="12h">۱۲ ساعت اخیر</option>
+                  <option value="1d">۱ روز اخیر</option>
+                  <option value="3d">۳ روز اخیر</option>
+                  <option value="7d">۷ روز اخیر</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداکثر سن بنا (سال)
+                </label>
+                <input type="number" name="age_max" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  طبقه
+                </label>
+                <div class="flex items-center gap-2">
+                  <input type="number" name="floor_min" placeholder="از" class="mini-input" />
+                  <span class="text-gray-400">تا</span>
+                  <input type="number" name="floor_max" placeholder="تا" class="mini-input" />
+                </div>
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداکثر کل طبقات ساختمان
+                </label>
+                <input type="number" name="floors_count_max" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداکثر واحد در هر طبقه
+                </label>
+                <input type="number" name="units_per_floor_max" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  گرمایش
+                </label>
+                <select name="heating_system" class="mini-select">
+                  <option value="">مهم نیست</option>
+                  <option value="shoofaj">شوفاژ</option>
+                  <option value="duct_split">داکت اسپلیت</option>
+                  <option value="split">اسپلیت</option>
+                  <option value="fan_coil">فن کویل</option>
+                  <option value="floor_heating">از کف</option>
+                  <option value="heater">بخاری</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  سرمایش
+                </label>
+                <select name="cooling_system" class="mini-select">
+                  <option value="">مهم نیست</option>
+                  <option value="duct_split">داکت اسپلیت</option>
+                  <option value="split">اسپلیت</option>
+                  <option value="air_conditioner">کولر گازی</option>
+                  <option value="water_cooler">کولر آبی</option>
+                  <option value="fan_coil">فن کویل</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  سرویس بهداشتی
+                </label>
+                <select name="toilet" class="mini-select">
+                  <option value="">مهم نیست</option>
+                  <option value="seat">فرنگی</option>
+                  <option value="squat">ایرانی</option>
+                  <option value="squat_seat">هر دو</option>
+                </select>
+              </div>
+
+              <div class="flex flex-col gap-2.5">
+                <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+                  <input type="checkbox" name="balcony" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+                  بالکن
+                </label>
+                <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+                  <input type="checkbox" name="rebuilt" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+                  بازسازی شده
+                </label>
+              </div>
+
+              <hr class="border-gray-200 dark:border-gray-700" />
+              <p class="text-theme-xs text-gray-400">این‌ها را دیوار ندارد</p>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداکثر رهن معادل (میلیون)
+                </label>
+                <input type="number" name="max_fre" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداکثر رهن معادل متری (میلیون)
+                </label>
+                <input type="number" name="max_fre_per_meter" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div>
+                <label class="mb-1.5 block text-theme-xs text-gray-600 dark:text-gray-400">
+                  حداقل تعداد عکس
+                </label>
+                <input type="number" name="min_images" placeholder="مهم نیست" class="mini-input" />
+              </div>
+
+              <div class="flex flex-col gap-2.5">
+                <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+                  <input type="checkbox" name="convertible_only" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+                  فقط ودیعه/اجاره قابل تبدیل
+                </label>
+                <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+                  <input type="checkbox" name="below_median_only" class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+                  فقط زیر median بازار
+                </label>
+                <label class="flex cursor-pointer items-center gap-2.5 text-theme-sm text-gray-700 dark:text-gray-400">
+                  <input type="checkbox" name="hide_roommate" checked class="h-5 w-5 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20" />
+                  پنهان کردن آگهی هم‌خانه
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="mb-1.5 block text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              محله (اگر محدوده نکشیده باشید)
+            </label>
+            <input type="text" id="district-search" placeholder="مثلاً اختیاریه" autocomplete="off"
+              class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90" />
+            <div id="district-suggestions" class="mt-1.5 flex flex-col gap-1"></div>
+            <div id="district-chips" class="mt-2 flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <button type="submit" id="run-btn"
+            class="flex h-11 w-full items-center justify-center rounded-lg bg-brand-500 text-theme-sm font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-gray-300">
+            جستجو
+          </button>
+          <button type="button" id="save-btn" disabled
+            class="flex h-11 w-full items-center justify-center rounded-lg border border-gray-300 text-theme-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-400">
+            ذخیره برای اطلاع‌رسانی
+          </button>
+          <p id="progress" class="text-theme-xs text-gray-500 dark:text-gray-400"></p>
+          <div id="saved-box" class="flex flex-col gap-1.5"></div>
+        </form>
+      </aside>
+
+      <div class="relative flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        <!-- هدر -->
+        <header class="sticky top-0 z-999 flex w-full border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <div class="flex flex-grow items-center justify-between px-4 py-3 md:px-6">
+            <button @click.stop="sidebarToggle = !sidebarToggle"
+              class="z-99999 flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-500 xl:hidden dark:border-gray-800 dark:text-gray-400">
+              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">
+              جستجوی محدوده‌ای
+            </h2>
+            <button @click.prevent="darkMode = !darkMode"
+              class="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <svg x-show="!darkMode" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+              <svg x-show="darkMode" x-cloak class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <main class="mx-auto w-full max-w-[1600px] p-4 md:p-6">
+          <!-- کارت‌های آمار -->
+          <div class="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div class="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/3">
+              <span class="text-theme-xs text-gray-500 dark:text-gray-400">آگهی در محدوده</span>
+              <h4 id="stat-count" class="mt-1 text-title-xs font-bold text-gray-800 dark:text-white/90">—</h4>
+            </div>
+            <div class="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/3">
+              <span class="text-theme-xs text-gray-500 dark:text-gray-400">median رهن معادل متری</span>
+              <h4 id="stat-median" class="mt-1 text-title-xs font-bold text-gray-800 dark:text-white/90">—</h4>
+            </div>
+            <div class="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/3">
+              <span class="text-theme-xs text-gray-500 dark:text-gray-400">آگهی جدید</span>
+              <h4 id="stat-new" class="mt-1 text-title-xs font-bold text-gray-800 dark:text-white/90">—</h4>
+            </div>
+            <div class="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/3">
+              <span class="text-theme-xs text-gray-500 dark:text-gray-400">کنارگذاشته (مشکوک)</span>
+              <h4 id="stat-suspicious" class="mt-1 text-title-xs font-bold text-gray-800 dark:text-white/90">—</h4>
+            </div>
+          </div>
+
+          <!-- نقشه -->
+          <div class="mb-5 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/3">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-base font-medium text-gray-800 dark:text-white/90">
+                محدوده را روی نقشه بکشید
+              </h3>
+              <div id="region-chips" class="flex flex-wrap gap-1.5"></div>
+            </div>
+            <div id="map" class="h-[420px] w-full rounded-xl"></div>
+            <p class="mt-2 text-theme-xs text-gray-500 dark:text-gray-400">
+              پین‌ها تقریبی‌اند — دیوار مختصات دقیق را منتشر نمی‌کند.
+            </p>
+          </div>
+
+          <!-- جدول نتایج -->
+          <div class="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/3">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+              <div class="flex gap-1.5" id="tabs">
+                <button type="button" data-tab="results" class="tab-btn active">نتایج</button>
+                <button type="button" data-tab="bookmark" class="tab-btn">
+                  بوکمارک <span data-count="bookmark" class="tab-count">۰</span>
+                </button>
+                <button type="button" data-tab="trash" class="tab-btn">
+                  سطل آشغال <span data-count="trash" class="tab-count">۰</span>
+                </button>
+              </div>
+              <span id="result-note" class="text-theme-xs text-gray-500 dark:text-gray-400"></span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full">
+                <thead class="border-b border-gray-200 dark:border-gray-800">
+                  <tr id="table-head">
+                    <th data-sort="score" class="th">امتیاز</th>
+                    <th data-sort="fre_per_meter" class="th">متری</th>
+                    <th data-sort="full_rent_equivalent" class="th">رهن معادل</th>
+                    <th data-sort="vs_market_pct" class="th">٪ بازار</th>
+                    <th data-sort="size" class="th">متراژ</th>
+                    <th data-sort="rooms" class="th">اتاق</th>
+                    <th data-sort="year_built" class="th">ساخت</th>
+                    <th class="th">امکانات</th>
+                    <th class="th">عکس</th>
+                    <th data-sort="metro_distance_m" class="th">مترو</th>
+                    <th data-sort="price_change_pct" class="th">Δ قیمت</th>
+                    <th class="th">عنوان</th>
+                    <th class="th"></th>
+                  </tr>
+                </thead>
+                <tbody id="results-body"></tbody>
+              </table>
+            </div>
+            <div id="empty-state" class="px-5 py-12 text-center text-theme-sm text-gray-500 dark:text-gray-400">
+              محدوده‌ای بکشید یا محله‌ای انتخاب کنید، سپس «جستجو» بزنید.
+            </div>
+          </div>
+
+          <!-- مشکوک‌ها -->
+          <div id="suspicious-card" class="mt-5 hidden rounded-2xl border border-warning-500/30 bg-warning-50 p-5 dark:bg-warning-500/10">
+            <h3 class="mb-2 text-base font-medium text-gray-800 dark:text-white/90">
+              بیش از حد ارزان — احتمالاً اجاره واحد نیست
+            </h3>
+            <div id="suspicious-list" class="flex flex-col gap-1 text-theme-sm text-gray-600 dark:text-gray-400"></div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>

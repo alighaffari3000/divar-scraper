@@ -1,0 +1,184 @@
+{
+ "rooms": {
+  "type": "repeated_string",
+  "options": []
+ },
+ "has-video": {
+  "type": "boolean",
+  "options": []
+ },
+ "has-photo": {
+  "type": "boolean",
+  "options": []
+ },
+ "parking": {
+  "type": "boolean",
+  "options": []
+ },
+ "elevator": {
+  "type": "boolean",
+  "options": []
+ },
+ "warehouse": {
+  "type": "boolean",
+  "options": []
+ },
+ "balcony": {
+  "type": "boolean",
+  "options": []
+ },
+ "rebuilt": {
+  "type": "boolean",
+  "options": []
+ },
+ "building_direction": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "east",
+    "شرقی"
+   ],
+   [
+    "west",
+    "غربی"
+   ],
+   [
+    "north",
+    "شمالی"
+   ],
+   [
+    "south",
+    "جنوبی"
+   ]
+  ]
+ },
+ "cooling_system": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "water_cooler",
+    "کولر آبی"
+   ],
+   [
+    "air_conditioner",
+    "کولر گازی"
+   ],
+   [
+    "duct_split",
+    "داکت اسپلیت"
+   ],
+   [
+    "split",
+    "اسپلیت"
+   ],
+   [
+    "fan_coil",
+    "فن کوئل"
+   ]
+  ]
+ },
+ "heating_system": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "heater",
+    "بخاری"
+   ],
+   [
+    "shoofaj",
+    "شوفاژ"
+   ],
+   [
+    "fan_coil",
+    "فن کوئل"
+   ],
+   [
+    "floor_heating",
+    "از کف"
+   ],
+   [
+    "duct_split",
+    "داکت اسپلیت"
+   ],
+   [
+    "split",
+    "اسپلیت"
+   ],
+   [
+    "fireplace",
+    "شومینه"
+   ]
+  ]
+ },
+ "floor_type": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "ceramic",
+    "سرامیک"
+   ],
+   [
+    "wood_parquet",
+    "پارکت چوب"
+   ],
+   [
+    "laminate_parquet",
+    "پارکت لمینت"
+   ],
+   [
+    "stone",
+    "سنگ"
+   ],
+   [
+    "floor_covering",
+    "کف‌پوش PVC"
+   ],
+   [
+    "carpet",
+    "موکت"
+   ],
+   [
+    "mosaic",
+    "موزائیک"
+   ]
+  ]
+ },
+ "toilet": {
+  "type": "str",
+  "options": []
+ },
+ "warm_water_provider": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "water_heater",
+    "آبگرم‌کن"
+   ],
+   [
+    "powerhouse",
+    "موتورخانه"
+   ],
+   [
+    "package",
+    "پکیج"
+   ]
+  ]
+ },
+ "business-type": {
+  "type": "repeated_string",
+  "options": [
+   [
+    "real-estate-business",
+    "مشاور املاک"
+   ],
+   [
+    "personal",
+    "شخصی"
+   ]
+  ]
+ },
+ "recent_ads": {
+  "type": "str",
+  "options": []
+ }
+}
