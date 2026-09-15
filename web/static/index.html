@@ -315,6 +315,24 @@
           </button>
           <p id="progress" class="text-theme-xs text-gray-500 dark:text-gray-400"></p>
           <div id="saved-box" class="flex flex-col gap-1.5"></div>
+
+          <!-- تنظیمات بات — بات هر دقیقه از دیتابیس می‌خواند، ری‌استارت لازم نیست -->
+          <div class="rounded-lg border border-gray-200 px-3 py-3 dark:border-gray-700">
+            <p class="mb-2.5 text-theme-sm font-medium text-gray-700 dark:text-gray-400">
+              بات تلگرام
+            </p>
+            <div class="flex flex-col gap-2.5">
+              <label class="flex items-center justify-between gap-2 text-theme-xs text-gray-600 dark:text-gray-400">
+                <span>هر چند دقیقه اجرا شود</span>
+                <input type="number" id="set-interval" min="5" step="5" class="mini-input w-20" />
+              </label>
+              <label class="flex items-center justify-between gap-2 text-theme-xs text-gray-600 dark:text-gray-400">
+                <span>حداقل امتیاز برای پست</span>
+                <input type="number" id="set-threshold" min="0" max="100" step="5" class="mini-input w-20" />
+              </label>
+              <p id="bot-status" class="text-theme-xs text-gray-400"></p>
+            </div>
+          </div>
         </form>
       </aside>
 

@@ -285,12 +285,6 @@ async function loadSaved() {
     warn.textContent =
       `برای اطلاع‌رسانی، این‌ها را در .env بگذارید: ${data.missing_env.join("، ")}`;
     savedBox.appendChild(warn);
-  } else if (!data.interval_hours) {
-    const hint = document.createElement("p");
-    hint.className = "text-theme-xs text-gray-500 dark:text-gray-400";
-    hint.textContent =
-      "تلگرام آماده است. برای اجرای خودکار NOTIFY_INTERVAL_HOURS را در .env بگذارید.";
-    savedBox.appendChild(hint);
   }
 
   data.searches.forEach((s) => {
@@ -667,5 +661,54 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.onclick = () => showTab(btn.dataset.tab);
 });
 
+/* ---------- تنظیمات بات (بات هر دقیقه از دیتابیس می‌خواند) ---------- */
+
+const setInterval_ = document.getElementById("set-interval");
+const setThreshold = document.getElementById("set-threshold");
+const botStatus = document.getElementById("bot-status");
+
+function renderBotStatus(s) {
+  setInterval_.value = s.interval_minutes;
+  setThreshold.value = s.score_threshold;
+  const parts = [];
+  if (s.last_ok_run?.finished_at) {
+    const mins = Math.round((Date.now() - new Date(s.last_ok_run.finished_at)) / 60000);
+    parts.push(`آخرین اجرای موفق ${fa(mins)} دقیقه پیش، ${fa(s.last_ok_run.sent ?? 0)} پیام`);
+  } else {
+    parts.push("بات هنوز اجرایی نداشته");
+  }
+  if (s.last_run && !s.last_run.ok && s.last_run.finished_at) {
+    parts.push(`⚠️ آخرین اجرا خطا داد: ${(s.last_run.error ?? "").slice(0, 60)}`);
+  }
+  if (s.muted_until) parts.push(`🔇 ساکت تا ${s.muted_until.slice(0, 16)}`);
+  botStatus.textContent = parts.join(" · ");
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    renderBotStatus(await res.json());
+  } catch {
+    botStatus.textContent = "";
+  }
+}
+
+async function saveSettings() {
+  const body = {
+    interval_minutes: Number(setInterval_.value) || null,
+    score_threshold: Number(setThreshold.value),
+  };
+  const res = await fetch("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  renderBotStatus(await res.json());
+}
+
+setInterval_.addEventListener("change", saveSettings);
+setThreshold.addEventListener("change", saveSettings);
+
 loadSaved();
 loadCounts();
+loadSettings();

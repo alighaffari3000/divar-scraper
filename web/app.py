@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from divar_demo import config, geo, notify, search  # noqa: E402
+from divar_demo import config, geo, search  # noqa: E402
 from divar_demo.store import Store  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,34 +58,6 @@ def _cache_put(key, value):
     if len(_search_cache) > 20:
         oldest = min(_search_cache, key=lambda k: _search_cache[k][0])
         _search_cache.pop(oldest, None)
-
-
-@app.on_event("startup")
-def start_scheduler():
-    """اطلاع‌رسانی دوره‌ای — فقط اگر در .env روشن شده باشد."""
-    if not config.NOTIFY_INTERVAL_HOURS or not config.telegram_ready():
-        return
-    from apscheduler.schedulers.background import BackgroundScheduler
-
-    def job():
-        with search_lock_sync():
-            notify.run_saved_searches()
-
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(job, "interval", hours=config.NOTIFY_INTERVAL_HOURS,
-                      id="notify", max_instances=1, coalesce=True)
-    scheduler.start()
-    app.state.scheduler = scheduler
-    print(f"اطلاع‌رسانی تلگرام هر {config.NOTIFY_INTERVAL_HOURS} ساعت فعال شد.")
-
-
-def search_lock_sync():
-    """قفل جداگانه برای زمان‌بند — نخ پس‌زمینه به asyncio.Lock دسترسی ندارد."""
-    import threading
-
-    if not hasattr(app.state, "_job_lock"):
-        app.state._job_lock = threading.Lock()
-    return app.state._job_lock
 
 
 class SearchRequest(BaseModel):
@@ -197,8 +169,38 @@ def searches():
                      for r in rows],
         "telegram_ready": config.telegram_ready(),
         "missing_env": config.missing(),
-        "interval_hours": config.NOTIFY_INTERVAL_HOURS,
     }
+
+
+class SettingsRequest(BaseModel):
+    interval_minutes: float | None = None
+    score_threshold: float | None = None
+
+
+@app.get("/api/settings")
+def get_settings():
+    """تنظیمات بات + وضعیت آخرین اجرا. بات هر دقیقه همین‌ها را می‌خواند."""
+    with Store() as store:
+        st = store.all_settings()
+        last_ok = store.last_ok_run()
+        runs = store.last_runs(1)
+    return {
+        "interval_minutes": float(st.get("interval_minutes") or config.BOT_INTERVAL_MINUTES),
+        "score_threshold": float(st.get("score_threshold") or config.BOT_SCORE_THRESHOLD),
+        "muted_until": st.get("muted_until"),
+        "last_ok_run": last_ok,
+        "last_run": runs[0] if runs else None,
+    }
+
+
+@app.put("/api/settings")
+def put_settings(req: SettingsRequest):
+    with Store() as store:
+        if req.interval_minutes is not None:
+            store.set_setting("interval_minutes", max(5.0, req.interval_minutes))
+        if req.score_threshold is not None:
+            store.set_setting("score_threshold", min(100.0, max(0.0, req.score_threshold)))
+    return get_settings()
 
 
 @app.post("/api/searches")

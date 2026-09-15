@@ -28,7 +28,12 @@ def _float(name, default):
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-# هر چند ساعت جستجوهای ذخیره‌شده دوباره اجرا شوند. صفر = خاموش.
+# بات: پیش‌فرض‌ها. مقدار واقعی از جدول settings (قابل تغییر در پنل) خوانده می‌شود؛
+# این‌ها فقط وقتی به کار می‌آیند که چیزی در پنل تنظیم نشده باشد.
+BOT_INTERVAL_MINUTES = _float("BOT_INTERVAL_MINUTES", 30)
+BOT_SCORE_THRESHOLD = _float("BOT_SCORE_THRESHOLD", 70)
+
+# قدیمی — دیگر استفاده نمی‌شود (زمان‌بند از FastAPI به بات منتقل شد)
 NOTIFY_INTERVAL_HOURS = _float("NOTIFY_INTERVAL_HOURS", 0)
 
 # فقط آگهی‌هایی که رهن معادلشان دست‌کم این‌قدر درصد کم شده پیام شوند

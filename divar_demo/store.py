@@ -52,6 +52,28 @@ CREATE TABLE IF NOT EXISTS marks (
     note     TEXT,
     PRIMARY KEY (token, kind)
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS sent_posts (      -- آنچه بات در گروه پست کرده
+    token      TEXT NOT NULL,
+    chat_id    TEXT NOT NULL,
+    message_id INTEGER,
+    search_id  INTEGER,
+    sent_at    TEXT NOT NULL,
+    score      REAL,
+    last_fre   REAL,                          -- آخرین رهن معادلی که اطلاع داده شد
+    PRIMARY KEY (token, chat_id)
+);
+CREATE TABLE IF NOT EXISTS bot_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    ok          INTEGER,
+    error       TEXT,
+    sent        INTEGER DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_snapshots_token ON snapshots(token);
 CREATE INDEX IF NOT EXISTS idx_marks_kind ON marks(kind);
 """
@@ -70,6 +92,9 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.Lock()
         with self.lock:
+            # دو فرایند (پنل و بات) هم‌زمان می‌نویسند؛ WAL نمی‌گذارد همدیگر را بلاک کنند
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.executescript(SCHEMA)
             self.conn.commit()
 
@@ -231,3 +256,103 @@ class Store:
         with self.lock:
             self.conn.execute("DELETE FROM searches WHERE id = ?", (search_id,))
             self.conn.commit()
+
+    # --- تنظیمات (قابل تغییر از پنل، خوانده‌شده توسط بات) ---
+
+    def get_setting(self, key, default=None):
+        with self.lock:
+            row = self.conn.execute("SELECT value FROM settings WHERE key = ?",
+                                    (key,)).fetchone()
+        return row["value"] if row and row["value"] is not None else default
+
+    def set_setting(self, key, value):
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                              (key, None if value is None else str(value)))
+            self.conn.commit()
+
+    def all_settings(self):
+        with self.lock:
+            return {r["key"]: r["value"] for r in
+                    self.conn.execute("SELECT key, value FROM settings")}
+
+    # --- پست‌های فرستاده‌شده توسط بات ---
+
+    def sent_post(self, token, chat_id):
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM sent_posts WHERE token = ? AND chat_id = ?",
+                (token, str(chat_id))).fetchone()
+        return dict(row) if row else None
+
+    def sent_tokens(self, chat_id):
+        with self.lock:
+            return {r["token"] for r in self.conn.execute(
+                "SELECT token FROM sent_posts WHERE chat_id = ?", (str(chat_id),))}
+
+    def record_sent(self, token, chat_id, message_id, search_id, score, fre):
+        with self.lock:
+            self.conn.execute(
+                """INSERT OR REPLACE INTO sent_posts
+                   (token, chat_id, message_id, search_id, sent_at, score, last_fre)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (token, str(chat_id), message_id, search_id, now(), score, fre))
+            self.conn.commit()
+
+    def update_sent_fre(self, token, chat_id, fre):
+        with self.lock:
+            self.conn.execute(
+                "UPDATE sent_posts SET last_fre = ? WHERE token = ? AND chat_id = ?",
+                (fre, token, str(chat_id)))
+            self.conn.commit()
+
+    # --- اجراهای بات ---
+
+    def start_run(self):
+        with self.lock:
+            cur = self.conn.execute("INSERT INTO bot_runs (started_at) VALUES (?)", (now(),))
+            self.conn.commit()
+            return cur.lastrowid
+
+    def finish_run(self, run_id, ok, error=None, sent=0):
+        with self.lock:
+            self.conn.execute(
+                "UPDATE bot_runs SET finished_at = ?, ok = ?, error = ?, sent = ? WHERE id = ?",
+                (now(), 1 if ok else 0, error, sent, run_id))
+            self.conn.commit()
+
+    def last_runs(self, n=5):
+        with self.lock:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT * FROM bot_runs ORDER BY id DESC LIMIT ?", (n,))]
+
+    def last_ok_run(self):
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM bot_runs WHERE ok = 1 ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def consecutive_failures(self):
+        count = 0
+        for run in self.last_runs(10):
+            if run["finished_at"] is None:
+                continue
+            if run["ok"]:
+                break
+            count += 1
+        return count
+
+    def post_last_seen(self, token):
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT last_seen FROM posts WHERE token = ?", (token,)).fetchone()
+        return row["last_seen"] if row else None
+
+    def snapshot_at(self, token, at):
+        """آخرین عکس لحظه‌ای قبل از یک زمان — برای «قیمت وقتی بوکمارک شد»."""
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT deposit, monthly_rent, seen_at FROM snapshots
+                   WHERE token = ? AND seen_at <= ? ORDER BY seen_at DESC LIMIT 1""",
+                (token, at)).fetchone()
+        return dict(row) if row else None
