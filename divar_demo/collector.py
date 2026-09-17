@@ -7,6 +7,7 @@ import re
 import threading
 import time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -403,6 +404,33 @@ class RateLimiter:
             time.sleep(max(sleep_for, 0.05))
 
 
+_AGE_UNITS = {"ثانیه": 1 / 86400, "دقیقه": 1 / 1440, "ساعت": 1 / 24,
+              "روز": 1, "هفته": 7, "ماه": 30, "سال": 365}
+_AGE_RE = re.compile(r"(?:([۰-۹\d]+)\s*)?(ثانیه|دقیقه|ساعت|روز|هفته|ماه|سال)\s*پیش")
+
+
+def parse_age_days(text):
+    """«۳ روز پیش» → 3.0 | «دیروز» → 1.0 | «لحظاتی پیش» → 0.0 | نشناخت → None.
+
+    دیوار روی کارت لیست زمان انتشار را فقط برای آگهی شخصی نشان می‌دهد؛ این
+    از عنوان صفحه خود آگهی خوانده می‌شود که همیشه هست.
+    """
+    if not text:
+        return None
+    text = text.translate(_FA_DIGITS)
+    if "پریروز" in text:
+        return 2.0
+    if "دیروز" in text:
+        return 1.0
+    if "امروز" in text or "لحظاتی" in text or "دقایقی" in text or "ربع" in text:
+        return 0.0
+    m = _AGE_RE.search(text)
+    if not m:
+        return None
+    count, unit = m.group(1), m.group(2)
+    return float(count or 1) * _AGE_UNITS[unit]
+
+
 def fetch_detail(token, session=None):
     """اطلاعات ساختاریافته یک آگهی: متراژ، اتاق، ساخت، طبقه، امکانات، توضیحات."""
     session = session or requests
@@ -421,6 +449,7 @@ def fetch_detail(token, session=None):
     features = {}
     description = None
     images = []
+    age_text = None
 
     for section in payload.get("sections", []):
         for widget in section.get("widgets", []):
@@ -434,6 +463,13 @@ def fetch_detail(token, session=None):
                     url = (shot.get("image") or {}).get("url")
                     if url and url not in images:
                         images.append(url)
+
+            # «۳ روز پیش در تهران، هفت حوض» — تنها جای قابل اتکا برای سن آگهی
+            if age_text is None and section.get("section_name") == "TITLE":
+                title = data.get("title")
+                if isinstance(title, str) and "پیش" in title or (
+                        isinstance(title, str) and ("دیروز" in title or "امروز" in title)):
+                    age_text = title.split(" در ")[0]
 
             if kind == "GROUP_INFO_ROW":
                 for item in data.get("items", []):
@@ -451,8 +487,27 @@ def fetch_detail(token, session=None):
             elif kind == "DESCRIPTION_ROW" and description is None:
                 description = data.get("text")
 
+    # سن را همین‌جا به زمان مطلق تبدیل کن — جزئیات تا ۷ روز کش می‌شود و
+    # «۳ روز پیش» فردا دیگر درست نیست.
+    age_days = parse_age_days(age_text)
+    published_at = None
+    if age_days is not None:
+        published_at = (datetime.now(timezone.utc)
+                        - timedelta(days=age_days)).isoformat(timespec="seconds")
+
     return {"token": token, "fields": fields, "features": features,
-            "description": description, "images": images}
+            "description": description, "images": images,
+            "published_text": age_text, "published_at": published_at}
+
+
+# کلیدهایی که نسخه‌های تازه‌تر fetch_detail اضافه کرده‌اند. جزئیاتِ کش‌شده‌ای
+# که این‌ها را ندارد کهنه حساب می‌شود، وگرنه تا هفت روز عکس و زمان انتشار
+# نمی‌آید — چون کش خودش را تازه می‌داند.
+DETAIL_KEYS = ("images", "published_at")
+
+
+def _cache_usable(detail):
+    return detail is not None and all(k in detail for k in DETAIL_KEYS)
 
 
 def fetch_details(tokens, delay=0.4, store=None):
@@ -461,7 +516,7 @@ def fetch_details(tokens, delay=0.4, store=None):
     for token in tokens:
         if store is not None:
             cached = store.get_detail(token)
-            if cached is not None:
+            if _cache_usable(cached):
                 yield cached
                 continue
         try:
@@ -488,7 +543,7 @@ def fetch_details_parallel(tokens, store=None, workers=3, limiter=None):
         if store is not None:
             with write_lock:
                 cached = store.get_detail(token)
-            if cached is not None:
+            if _cache_usable(cached):
                 return cached
         limiter.acquire()
         try:
