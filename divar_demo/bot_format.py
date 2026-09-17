@@ -89,10 +89,6 @@ def caption(item, median):
     return "\n".join(lines)[:1000]
 
 
-# متن پیامِ دکمه‌ها. کوتاه است چون کپشن اصلی روی آلبوم نشسته.
-ACTIONS_LINE = "⤴️ همین آگهی"
-
-
 def keyboard(token, bookmarked=False, url=None):
     star = "★ بوکمارک شد" if bookmarked else "☆ بوکمارک"
     row = [

@@ -120,20 +120,16 @@ async def post_item(bot, store, item, median, search_id):
     msg = None
     media_ids = []
 
-    # کپشن روی خودِ آلبوم می‌نشیند تا عکس و متن یک پست باشند. دکمه‌ها ناچار
-    # جدا می‌روند: تلگرام برای media group دکمه شیشه‌ای نمی‌پذیرد.
-    # تلگرام کپشن عکس را تا ۱۰۲۴ نویسه می‌پذیرد (متن ساده تا ۴۰۹۶)
-    caption = text if len(text) <= 1024 else None
-
+    # آلبوم بدون کپشن، و بلافاصله زیرش متن کامل با دکمه‌های شیشه‌ای به‌صورت
+    # reply. کپشن روی آلبوم هم می‌شد گذاشت ولی آن‌وقت متن زیر عکس‌ها فشرده
+    # می‌شود و دکمه‌ها از متن جدا می‌افتند.
     if len(photos) > 1:
         try:
-            media = [InputMediaPhoto(photos[0], caption=caption, parse_mode="HTML")]
-            media += [InputMediaPhoto(p) for p in photos[1:]]
-            group = await bot.send_media_group(chat_id(), media=media)
+            group = await bot.send_media_group(
+                chat_id(), media=[InputMediaPhoto(p) for p in photos])
             media_ids = [m.message_id for m in group]
-            msg = await bot.send_message(chat_id(),
-                                         fmt.ACTIONS_LINE if caption else text,
-                                         parse_mode="HTML", reply_markup=kb,
+            msg = await bot.send_message(chat_id(), text, parse_mode="HTML",
+                                         reply_markup=kb,
                                          reply_to_message_id=media_ids[0],
                                          disable_web_page_preview=True)
         except TelegramError as exc:
@@ -141,7 +137,8 @@ async def post_item(bot, store, item, median, search_id):
             msg, media_ids = None, []
     elif len(photos) == 1:
         try:
-            msg = await bot.send_photo(chat_id(), photo=photos[0], caption=caption or text[:1024],
+            # کپشن عکس تکی تا ۱۰۲۴ نویسه مجاز است (متن ساده تا ۴۰۹۶)
+            msg = await bot.send_photo(chat_id(), photo=photos[0], caption=text[:1024],
                                        parse_mode="HTML", reply_markup=kb)
         except TelegramError as exc:
             log.warning("send_photo failed for %s: %s", item["token"], exc)
