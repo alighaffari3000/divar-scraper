@@ -69,6 +69,20 @@ def params_from_request(data):
     return out
 
 
+def _exclude_names(ids, names, city):
+    """محله‌های کنارگذاشته → مجموعه نام نرمال‌شده.
+
+    شناسه‌ها به نام ترجمه می‌شوند چون دیوار روی خود آگهی نام محله را می‌گذارد،
+    نه شناسه‌اش.
+    """
+    wanted = {str(x) for x in (ids or [])}
+    out = {geo.normalize_fa(n) for n in (names or []) if n}
+    if wanted:
+        out |= {geo.normalize_fa(d["name"]) for d in geo.load_districts(city)
+                if str(d["id"]) in wanted}
+    return {n for n in out if n} or None
+
+
 def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                size=None, rooms_min=None, credit_max=None, rent_max=None,
                parking=False, elevator=False, storage=False, owner_only=False,
@@ -80,6 +94,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                max_fre=None, max_fre_per_meter=None, min_images=None,
                convertible_only=False, below_median_only=False,
                hide_roommate=True, hide_trashed=True, weights=None,
+               exclude_district_ids=None, exclude_district_names=None,
                rate=listing.DEPOSIT_PER_RENT, on_progress=None, store=None):
     """جستجوی کامل. بازگشت یک dict با نتایج و آمار.
 
@@ -101,7 +116,9 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
              "min_images": min_images, "convertible_only": convertible_only,
              "below_median_only": below_median_only,
              "hide_roommate": hide_roommate, "hide_trashed": hide_trashed,
-             "weights": weights, "city": city}
+             "weights": weights, "city": city,
+             "exclude_districts": _exclude_names(exclude_district_ids,
+                                                 exclude_district_names, city)}
 
     if polygon and not bbox:
         bbox = geo.bbox_of(polygon)
@@ -163,6 +180,7 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
         max_fre_per_meter=filters.get("max_fre_per_meter"),
         min_images=filters.get("min_images"),
         convertible_only=filters.get("convertible_only", False),
+        exclude_districts=filters.get("exclude_districts"),
     )]
     note(f"{len(kept)} از {len(items)} از فیلترهای قطعی گذشت")
 

@@ -66,6 +66,9 @@ class SearchRequest(BaseModel):
     district_ids: list[int] = []
     # فقط برای بازسازی چیپ‌ها موقع ویرایش؛ موتور جستجو نادیده‌اش می‌گیرد
     district_names: list[str] = []
+    # محله‌هایی که حتی داخل محدوده نقشه هم نباید بیایند
+    exclude_district_ids: list[int] = []
+    exclude_district_names: list[str] = []
     size_min: float | None = None
     size_max: float | None = None
     rooms_min: int | None = None

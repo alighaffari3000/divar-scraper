@@ -420,11 +420,20 @@ def fetch_detail(token, session=None):
     fields = {}
     features = {}
     description = None
+    images = []
 
     for section in payload.get("sections", []):
         for widget in section.get("widgets", []):
             kind = widget.get("widget_type")
             data = widget.get("data", {})
+
+            # بخش IMAGE آدرس اندازه کامل (webp_post) را می‌دهد؛ کارت نقشه فقط
+            # webp_thumbnail دارد که برای تلگرام بی‌کیفیت است.
+            if section.get("section_name") == "IMAGE":
+                for shot in data.get("items", []):
+                    url = (shot.get("image") or {}).get("url")
+                    if url and url not in images:
+                        images.append(url)
 
             if kind == "GROUP_INFO_ROW":
                 for item in data.get("items", []):
@@ -442,7 +451,8 @@ def fetch_detail(token, session=None):
             elif kind == "DESCRIPTION_ROW" and description is None:
                 description = data.get("text")
 
-    return {"token": token, "fields": fields, "features": features, "description": description}
+    return {"token": token, "fields": fields, "features": features,
+            "description": description, "images": images}
 
 
 def fetch_details(tokens, delay=0.4, store=None):

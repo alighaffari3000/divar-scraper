@@ -21,17 +21,18 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
-from telegram import Update
+from telegram import InputMediaPhoto, Update
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from . import bot_format as fmt
-from . import config, listing, search
+from . import collector, config, listing, search
 from .store import Store
 
 log = logging.getLogger("divar.bot")
 
 TICK_SECONDS = 60
+PHOTOS_PER_POST = 3  # تلگرام تا ۱۰ تا در گالری می‌پذیرد؛ ۳ تا گروه را شلوغ نمی‌کند
 cycle_lock = asyncio.Lock()
 
 
@@ -78,10 +79,26 @@ def photo_bytes(url):
 
         img = Image.open(io.BytesIO(raw)).convert("RGB")
         out = io.BytesIO()
-        img.save(out, format="JPEG", quality=85)
+        # کیفیت بالا چون منبع حالا webp_post است، نه بندانگشتی
+        img.save(out, format="JPEG", quality=92, optimize=True)
         return out.getvalue()
     except Exception:  # Pillow نیست یا فایل خراب است — خام بفرست، شاید قبول کند
         return raw
+
+
+def photo_urls(store, item):
+    """آدرس عکس‌های اندازه کامل. اگر جزئیات در دسترس نبود، بندانگشتی کارت.
+
+    جزئیات کش می‌شود، پس این معمولاً درخواست شبکه اضافه ندارد.
+    """
+    try:
+        for detail in collector.fetch_details([item["token"]], store=store):
+            urls = (detail or {}).get("images") or []
+            if urls:
+                return urls
+    except Exception:
+        log.warning("گرفتن عکس‌های %s نشد", item["token"], exc_info=True)
+    return [item["image_url"]] if item.get("image_url") else []
 
 
 # ---------- ارسال ----------
@@ -90,22 +107,45 @@ async def post_item(bot, store, item, median, search_id):
     text = fmt.caption(item, median)
     kb = fmt.keyboard(item["token"], item.get("bookmarked"), item.get("url"))
 
+    photos = []
+    if item.get("real_photos") is not False:
+        urls = await asyncio.to_thread(photo_urls, store, item)
+        for url in urls[:PHOTOS_PER_POST]:
+            data = await asyncio.to_thread(photo_bytes, url)
+            if data:
+                photos.append(data)
+
     msg = None
-    use_photo = item.get("image_url") and item.get("real_photos") is not False
-    if use_photo:
-        data = await asyncio.to_thread(photo_bytes, item["image_url"])
-        if data:
-            try:
-                msg = await bot.send_photo(chat_id(), photo=data, caption=text,
-                                           parse_mode="HTML", reply_markup=kb)
-            except TelegramError as exc:
-                log.warning("send_photo failed for %s: %s", item["token"], exc)
+    media_ids = []
+
+    # گالری دکمه شیشه‌ای نمی‌پذیرد، پس عکس‌ها جدا می‌روند و متن با دکمه‌ها
+    # بلافاصله زیرشان به‌صورت reply — هنوز یک بلوک به‌هم‌چسبیده در گروه.
+    if len(photos) > 1:
+        try:
+            group = await bot.send_media_group(
+                chat_id(), media=[InputMediaPhoto(p) for p in photos])
+            media_ids = [m.message_id for m in group]
+            msg = await bot.send_message(chat_id(), text, parse_mode="HTML",
+                                         reply_markup=kb,
+                                         reply_to_message_id=media_ids[0],
+                                         disable_web_page_preview=True)
+        except TelegramError as exc:
+            log.warning("send_media_group failed for %s: %s", item["token"], exc)
+            msg, media_ids = None, []
+    elif len(photos) == 1:
+        try:
+            msg = await bot.send_photo(chat_id(), photo=photos[0], caption=text,
+                                       parse_mode="HTML", reply_markup=kb)
+        except TelegramError as exc:
+            log.warning("send_photo failed for %s: %s", item["token"], exc)
+
     if msg is None:
         msg = await bot.send_message(chat_id(), text, parse_mode="HTML", reply_markup=kb,
                                      disable_web_page_preview=True)
 
     store.record_sent(item["token"], chat_id(), msg.message_id, search_id,
-                      item.get("score"), item.get("full_rent_equivalent"))
+                      item.get("score"), item.get("full_rent_equivalent"),
+                      media_ids=media_ids)
     return msg
 
 
@@ -314,6 +354,11 @@ async def on_callback(update: Update, ctx):
     with Store() as store:
         if kind == "t":
             store.mark(token, "trash")
+            for mid in store.sent_media_ids(token, chat_id()):
+                try:
+                    await ctx.bot.delete_message(chat_id(), mid)
+                except (BadRequest, Forbidden):
+                    pass  # قدیمی‌تر از ۴۸ ساعت یا از قبل حذف شده
             try:
                 await q.message.delete()
             except (BadRequest, Forbidden):

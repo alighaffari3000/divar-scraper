@@ -8,6 +8,8 @@ import datetime
 import re
 import statistics
 
+from . import geo
+
 
 def _current_jalali_year(today=None):
     """سال شمسی جاری. تقریب کافی: سال نو حدود ۲۱ مارس است."""
@@ -174,7 +176,8 @@ def _from_rounded(text):
 def passes_hard_filters(item, size=None, rooms=None, credit=None, rent=None,
                        need_parking=False, need_elevator=False, need_storage=False,
                        need_real_photos=False, max_fre=None, max_fre_per_meter=None,
-                       min_images=None, convertible_only=False):
+                       min_images=None, convertible_only=False,
+                       exclude_districts=None):
     """فیلترهای قطعی. آگهی‌ای که رد شود اصلاً وارد مرحله بعد نمی‌شود.
 
     همه پارامترها اختیاری‌اند؛ None یا False یعنی اعمال نشود.
@@ -221,6 +224,14 @@ def passes_hard_filters(item, size=None, rooms=None, credit=None, rent=None,
     # مثل real_photos فقط وقتی جزئیات موجود باشد اثر دارد
     if convertible_only and item.get("convertible") == "غیر قابل تبدیل":
         return False
+
+    # محله‌های کنارگذاشته — حتی اگر آگهی داخل محدوده نقشه باشد.
+    # نام محله همانی است که خود دیوار روی آگهی گذاشته؛ آگهی بدون محله نگه داشته
+    # می‌شود چون نمی‌شود اثبات کرد در محله کنارگذاشته است.
+    if exclude_districts:
+        name = geo.normalize_fa(item.get("district"))
+        if name and name in exclude_districts:
+            return False
 
     return True
 

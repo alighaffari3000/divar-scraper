@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS sent_posts (      -- آنچه بات در گروه پ
     sent_at    TEXT NOT NULL,
     score      REAL,
     last_fre   REAL,                          -- آخرین رهن معادلی که اطلاع داده شد
+    media_ids  TEXT,                          -- شناسه پیام‌های گالری، برای حذف دسته‌جمعی
     PRIMARY KEY (token, chat_id)
 );
 CREATE TABLE IF NOT EXISTS bot_runs (
@@ -98,11 +99,16 @@ class Store:
             self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.executescript(SCHEMA)
             # دیتابیس‌هایی که قبل از افزوده‌شدن enabled ساخته شده‌اند
-            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(searches)")}
-            if "enabled" not in cols:
+            for table, column, ddl in (
+                ("searches", "enabled", "ALTER TABLE searches ADD COLUMN "
+                                        "enabled INTEGER NOT NULL DEFAULT 1"),
+                ("sent_posts", "media_ids", "ALTER TABLE sent_posts ADD COLUMN media_ids TEXT"),
+            ):
+                cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+                if column in cols:
+                    continue
                 try:
-                    self.conn.execute(
-                        "ALTER TABLE searches ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+                    self.conn.execute(ddl)
                 except sqlite3.OperationalError:
                     pass  # اتصال دیگری (پنل یا بات) هم‌زمان همین را اضافه کرده
             self.conn.commit()
@@ -329,14 +335,25 @@ class Store:
             return {r["token"] for r in self.conn.execute(
                 "SELECT token FROM sent_posts WHERE chat_id = ?", (str(chat_id),))}
 
-    def record_sent(self, token, chat_id, message_id, search_id, score, fre):
+    def record_sent(self, token, chat_id, message_id, search_id, score, fre,
+                    media_ids=None):
         with self.lock:
             self.conn.execute(
                 """INSERT OR REPLACE INTO sent_posts
-                   (token, chat_id, message_id, search_id, sent_at, score, last_fre)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (token, str(chat_id), message_id, search_id, now(), score, fre))
+                   (token, chat_id, message_id, search_id, sent_at, score, last_fre,
+                    media_ids)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (token, str(chat_id), message_id, search_id, now(), score, fre,
+                 json.dumps(media_ids) if media_ids else None))
             self.conn.commit()
+
+    def sent_media_ids(self, token, chat_id):
+        """شناسه پیام‌های گالری یک آگهی — برای حذف کامل، نه فقط پیام متنی."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT media_ids FROM sent_posts WHERE token = ? AND chat_id = ?",
+                (token, str(chat_id))).fetchone()
+        return json.loads(row["media_ids"]) if row and row["media_ids"] else []
 
     def update_sent_fre(self, token, chat_id, fre):
         with self.lock:

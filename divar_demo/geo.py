@@ -124,7 +124,7 @@ def districts_in_polygon(polygon, city="tehran"):
             if d["lon"] is not None and point_in_polygon(d["lon"], d["lat"], polygon)]
 
 
-def _normalize(text):
+def normalize_fa(text):
     """ی و ک عربی، نیم‌فاصله، فاصله‌های اضافه."""
     if not text:
         return ""
@@ -139,24 +139,24 @@ def resolve_district(query, city="tehran", limit=5):
     """
     import difflib
 
-    needle = _normalize(query)
+    needle = normalize_fa(query)
     if not needle:
         return []
     districts = load_districts(city)
 
     exact = [d for d in districts
-             if _normalize(d["name"]) == needle
+             if normalize_fa(d["name"]) == needle
              or d["slug"] == query or d["second_slug"] == query]
     if exact:
         return exact[:limit]
 
-    prefix = [d for d in districts if _normalize(d["name"]).startswith(needle)]
+    prefix = [d for d in districts if normalize_fa(d["name"]).startswith(needle)]
     contains = [d for d in districts
-                if needle in _normalize(d["name"]) and d not in prefix]
+                if needle in normalize_fa(d["name"]) and d not in prefix]
 
     ranked = prefix + contains
     if len(ranked) < limit:
-        names = {_normalize(d["name"]): d for d in districts}
+        names = {normalize_fa(d["name"]): d for d in districts}
         for match in difflib.get_close_matches(needle, names, n=limit, cutoff=0.6):
             if names[match] not in ranked:
                 ranked.append(names[match])

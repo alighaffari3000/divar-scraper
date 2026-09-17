@@ -16,6 +16,7 @@ const WEIGHT_LABELS = { deal: "قیمت", age: "نوسازی", metro: "مترو"
 let state = {
   polygon: null,
   districts: [], // {id, name}
+  excludeDistricts: [], // {id, name} — هرگز نمایش داده نشوند
   results: [],
   weights: { deal: 30, age: 15, metro: 10 },
   sortKey: "score",
@@ -88,55 +89,78 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------- انتخاب محله ---------- */
 
-const districtInput = document.getElementById("district-search");
-const suggestionBox = document.getElementById("district-suggestions");
-const chipBox = document.getElementById("district-chips");
+/* دو جعبه محله داریم: یکی برای «فقط این محله‌ها»، یکی برای «هیچ‌وقت این‌ها».
+   هر دو رفتار یکسانی دارند، پس یک سازنده مشترک. */
+function districtPicker({ inputId, boxId, chipsId, stateKey, chipClass, chipBtnClass }) {
+  const input = document.getElementById(inputId);
+  const suggestionBox = document.getElementById(boxId);
+  const chipBox = document.getElementById(chipsId);
+  let timer = null;
 
-let suggestTimer = null;
-districtInput.addEventListener("input", () => {
-  clearTimeout(suggestTimer);
-  const q = districtInput.value.trim();
-  if (q.length < 2) {
-    suggestionBox.innerHTML = "";
-    return;
-  }
-  suggestTimer = setTimeout(async () => {
-    const res = await fetch(`/api/districts?q=${encodeURIComponent(q)}`);
-    const list = await res.json();
-    suggestionBox.innerHTML = "";
-    list.forEach((d) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className =
-        "rounded-lg border border-gray-200 px-3 py-1.5 text-right text-theme-xs text-gray-700 hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400";
-      btn.textContent = d.name;
-      btn.onclick = () => addDistrict(d);
-      suggestionBox.appendChild(btn);
+  function renderChips() {
+    chipBox.innerHTML = "";
+    state[stateKey].forEach((d) => {
+      const chip = document.createElement("span");
+      chip.className = chipClass;
+      chip.innerHTML = `${esc(d.name)} <button type="button" class="${chipBtnClass}">✕</button>`;
+      chip.querySelector("button").onclick = () => {
+        state[stateKey] = state[stateKey].filter((x) => x.id !== d.id);
+        renderChips();
+      };
+      chipBox.appendChild(chip);
     });
-  }, 250);
+  }
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) {
+      suggestionBox.innerHTML = "";
+      return;
+    }
+    timer = setTimeout(async () => {
+      const res = await fetch(`/api/districts?q=${encodeURIComponent(q)}`);
+      const list = await res.json();
+      suggestionBox.innerHTML = "";
+      list.forEach((d) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className =
+          "rounded-lg border border-gray-200 px-3 py-1.5 text-right text-theme-xs text-gray-700 hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400";
+        btn.textContent = d.name;
+        btn.onclick = () => {
+          if (!state[stateKey].find((x) => x.id === d.id)) state[stateKey].push(d);
+          input.value = "";
+          suggestionBox.innerHTML = "";
+          renderChips();
+        };
+        suggestionBox.appendChild(btn);
+      });
+    }, 250);
+  });
+
+  return renderChips;
+}
+
+const renderChips = districtPicker({
+  inputId: "district-search",
+  boxId: "district-suggestions",
+  chipsId: "district-chips",
+  stateKey: "districts",
+  chipClass:
+    "inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-theme-xs text-brand-600 dark:bg-brand-500/15 dark:text-brand-400",
+  chipBtnClass: "text-brand-400 hover:text-error-500",
 });
 
-function addDistrict(d) {
-  if (!state.districts.find((x) => x.id === d.id)) state.districts.push(d);
-  districtInput.value = "";
-  suggestionBox.innerHTML = "";
-  renderChips();
-}
-
-function renderChips() {
-  chipBox.innerHTML = "";
-  state.districts.forEach((d) => {
-    const chip = document.createElement("span");
-    chip.className =
-      "inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-theme-xs text-brand-600 dark:bg-brand-500/15 dark:text-brand-400";
-    chip.innerHTML = `${esc(d.name)} <button type="button" class="text-brand-400 hover:text-error-500">✕</button>`;
-    chip.querySelector("button").onclick = () => {
-      state.districts = state.districts.filter((x) => x.id !== d.id);
-      renderChips();
-    };
-    chipBox.appendChild(chip);
-  });
-}
+const renderExcludeChips = districtPicker({
+  inputId: "exclude-search",
+  boxId: "exclude-suggestions",
+  chipsId: "exclude-chips",
+  stateKey: "excludeDistricts",
+  chipClass:
+    "inline-flex items-center gap-1.5 rounded-full bg-error-50 px-3 py-1 text-theme-xs text-error-600 dark:bg-error-500/15 dark:text-error-400",
+  chipBtnClass: "text-error-400 hover:text-error-600",
+});
 
 /* ---------- دکمه‌های اتاق ---------- */
 
@@ -219,6 +243,8 @@ function buildPayload(refresh = false) {
     polygon: state.polygon,
     district_ids: state.districts.map((d) => d.id),
     district_names: state.districts.map((d) => d.name),
+    exclude_district_ids: state.excludeDistricts.map((d) => d.id),
+    exclude_district_names: state.excludeDistricts.map((d) => d.name),
     size_min: num("size_min"),
     size_max: num("size_max"),
     rooms_min: num("rooms_min"),
@@ -332,12 +358,12 @@ function applyPayload(params) {
   });
 
   // محله‌ها — نام‌ها کنار شناسه‌ها ذخیره می‌شوند تا چیپ‌ها خوانا برگردند
-  const names = p.district_names || [];
-  state.districts = (p.district_ids || []).map((id, i) => ({
-    id,
-    name: names[i] || `محله ${id}`,
-  }));
+  const pairs = (ids, names) =>
+    (ids || []).map((id, i) => ({ id, name: (names || [])[i] || `محله ${id}` }));
+  state.districts = pairs(p.district_ids, p.district_names);
+  state.excludeDistricts = pairs(p.exclude_district_ids, p.exclude_district_names);
   renderChips();
+  renderExcludeChips();
 
   // چندضلعی روی نقشه
   drawnItems.clearLayers();

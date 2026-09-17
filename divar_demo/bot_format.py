@@ -85,8 +85,10 @@ def keyboard(token, bookmarked=False, url=None):
         InlineKeyboardButton("🗑 حذف", callback_data=f"t:{token}"),
         InlineKeyboardButton(star, callback_data=f"b:{token}"),
     ]
+    # شماره تماس پشت لاگین دیوار است و API بدون احراز هویت ۴۰۱ می‌دهد، پس این
+    # دکمه صفحه آگهی را باز می‌کند — روی موبایل اپ دیوار، یک لمس تا «تماس».
     if url:
-        row.append(InlineKeyboardButton("🔗 دیوار", url=url))
+        row.append(InlineKeyboardButton("📞 تماس", url=url))
     return InlineKeyboardMarkup([row])
 
 
