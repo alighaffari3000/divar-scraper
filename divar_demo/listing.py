@@ -112,12 +112,14 @@ def from_map_card(card, list_row=None, rate=DEPOSIT_PER_RENT):
         rounded = False
         district = list_row.get("district")
         agency_text = list_row.get("agency_text")
+        bumped = list_row.get("bumped")
     else:
         deposit = _from_rounded(card.get("deposit_text"))
         monthly_rent = _from_rounded(card.get("rent_text"))
         rounded = True
         district = None
         agency_text = None
+        bumped = None
 
     size = card.get("size")
     fre = full_rent_equivalent(deposit, monthly_rent, rate)
@@ -129,6 +131,7 @@ def from_map_card(card, list_row=None, rate=DEPOSIT_PER_RENT):
         "title": card.get("title"),
         "district": district,
         "agency_text": agency_text,
+        "bumped": bumped,
         "lat": card.get("lat"),
         "lon": card.get("lon"),
         "approximate_location": card.get("approximate_location"),

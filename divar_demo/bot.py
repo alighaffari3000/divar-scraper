@@ -86,32 +86,32 @@ def photo_bytes(url):
         return raw
 
 
-def photo_urls(store, item):
-    """آدرس عکس‌های اندازه کامل. اگر جزئیات در دسترس نبود، بندانگشتی کارت."""
-    token = item["token"]
+def item_detail(store, token):
+    """جزئیات آگهی — از کش، و اگر کهنه یا نبود، تازه."""
     try:
-        urls = (store.get_detail(token) or {}).get("images") or []
-        if not urls:
-            # کش قبل از افزوده‌شدن images پر شده بود — تازه بگیر و همان را جا بگذار
-            detail = collector.fetch_detail(token)
-            store.put_detail(token, detail)
-            urls = detail.get("images") or []
-        if urls:
-            return urls
+        for detail in collector.fetch_details([token], store=store):
+            return detail
     except Exception:
-        log.warning("گرفتن عکس‌های %s نشد", token, exc_info=True)
-    return [item["image_url"]] if item.get("image_url") else []
+        log.warning("گرفتن جزئیات %s نشد", token, exc_info=True)
+    return None
 
 
 # ---------- ارسال ----------
 
 async def post_item(bot, store, item, median, search_id):
-    text = fmt.caption(item, median)
     kb = fmt.keyboard(item["token"], item.get("bookmarked"), item.get("url"))
+
+    # همین یک درخواست هم عکس‌های اندازه کامل می‌دهد هم زمان انتشار
+    detail = await asyncio.to_thread(item_detail, store, item["token"])
+    item.setdefault("published_text", (detail or {}).get("published_text"))
+
+    text = fmt.caption(item, median)
 
     photos = []
     if item.get("real_photos") is not False:
-        urls = await asyncio.to_thread(photo_urls, store, item)
+        urls = (detail or {}).get("images") or []
+        if not urls and item.get("image_url"):
+            urls = [item["image_url"]]
         for url in urls[:PHOTOS_PER_POST]:
             data = await asyncio.to_thread(photo_bytes, url)
             if data:

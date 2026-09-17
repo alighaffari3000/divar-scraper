@@ -173,6 +173,8 @@ def search(city_ids, form_data, pages=1, delay=0.5):
                     "deposit_text": data.get("top_description_text"),
                     "rent_text": data.get("middle_description_text"),
                     "agency_text": data.get("bottom_description_text"),
+                    # «نردبان شده» — آگهی قدیمی که دوباره بالا آورده شده
+                    "bumped": data.get("red_text") == "نردبان شده",
                 }
             )
 

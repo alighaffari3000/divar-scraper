@@ -67,6 +67,16 @@ def caption(item, median):
         photo = "   ·   ⚠️ عکس تزئینی"
     lines.append(f"✅ {amenities}{photo}")
 
+    # سن آگهی و اینکه نردبان شده — «۳ روز پیش» با «۳ روز پیش نردبان شده»
+    # زمین تا آسمان فرق دارد
+    when = []
+    if item.get("published_text"):
+        when.append(f"🕒 {esc(item['published_text'])}")
+    if item.get("bumped"):
+        when.append("🪜 نردبان‌شده")
+    if when:
+        lines.append("   ·   ".join(when))
+
     parts = item.get("score_parts") or {}
     breakdown = " · ".join(
         f"{LABELS.get(k, k)} {'+' if v > 0 else ''}{round(v)}" for k, v in parts.items())

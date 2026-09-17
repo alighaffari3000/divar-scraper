@@ -295,6 +295,7 @@ form.addEventListener("submit", async (e) => {
   const payload = buildPayload(forceRefresh);
 
   state.lastPayload = payload;
+  rememberSearch(payload);
   setLoading(true);
   setProgress("");
   showTab("results");
@@ -531,13 +532,6 @@ function describeParams(p) {
 /* ---------- نمایش نتایج ---------- */
 
 function render(out) {
-  // فیلتر زمان دیوار بر پایه «نردبان» است؛ اگر سن واقعی بررسی نشده باشد
-  // ممکن است آگهی قدیمیِ نردبان‌شده در لیست بماند
-  if (out.age_check_skipped) {
-    setProgress(
-      "نتایج زیاد بود، پس زمان انتشار واقعی بررسی نشد — محدوده یا فیلترها را تنگ‌تر کنید."
-    );
-  }
 
   state.results = out.results;
   rescore();
@@ -649,9 +643,11 @@ function renderTable() {
         r.price_change_pct == null || Math.abs(r.price_change_pct) < 0.5
           ? '<span class="text-gray-300">—</span>'
           : `<span class="${r.price_change_pct < 0 ? "text-success-600" : "text-error-500"}">${pct(r.price_change_pct)}</span>`;
-      const badge = r.is_new
-        ? '<span class="tag tag-new me-1">جدید</span>'
-        : "";
+      const badge =
+        (r.is_new ? '<span class="tag tag-new me-1">جدید</span>' : "") +
+        (r.bumped
+          ? '<span class="tag tag-warn me-1" title="آگهی قدیمی که دوباره بالا آورده شده — فیلتر «آگهی‌های اخیر» دیوار بر همین پایه است، نه تاریخ انتشار">نردبان</span>'
+          : "");
       const metro = r.metro_distance_m == null
         ? "—"
         : `<span class="${r.metro_distance_m <= 800 ? "text-success-600" : ""}">${fa(r.metro_distance_m)}م</span>
@@ -763,6 +759,7 @@ async function toggleDetail(tr, r) {
         ${img}
         <div class="grid flex-1 gap-3 md:grid-cols-3">
           <div class="text-theme-sm text-gray-700 dark:text-gray-300">
+            <div><b>منتشر شده:</b> ${esc(d.published_text ?? "—")}${r.bumped ? " (نردبان‌شده)" : ""}</div>
             <div><b>طبقه:</b> ${esc(f["طبقه"] ?? "—")}</div>
             <div><b>ساخت:</b> ${esc(f["ساخت"] ?? "—")}</div>
             <div><b>ودیعه و اجاره:</b> ${esc(f["ودیعه و اجاره"] ?? "—")}</div>
@@ -951,6 +948,34 @@ async function saveSettings() {
 setInterval_.addEventListener("change", saveSettings);
 setThreshold.addEventListener("change", saveSettings);
 
+/* ---------- آخرین جستجو ---------- */
+
+// دفعه بعد که پنل را باز می‌کنید همان فیلترها آماده‌اند. فقط در همین مرورگر
+// می‌ماند؛ چیزی سمت سرور ذخیره نمی‌شود.
+const LAST_SEARCH_KEY = "divar:last-search";
+
+function rememberSearch(payload) {
+  try {
+    const { refresh, ...rest } = payload;
+    localStorage.setItem(LAST_SEARCH_KEY, JSON.stringify(rest));
+  } catch {
+    // حالت ناشناس مرورگر یا فضای پر — فراموش‌کاری اینجا ایرادی ندارد
+  }
+}
+
+function restoreLastSearch() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(LAST_SEARCH_KEY) || "null");
+  } catch {
+    saved = null;
+  }
+  if (!saved) return;
+  applyPayload(saved);
+  setProgress("فیلترهای آخرین جستجو بازگردانده شد — «جستجو» را بزنید.");
+}
+
+restoreLastSearch();
 loadSaved();
 loadCounts();
 loadSettings();

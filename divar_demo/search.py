@@ -8,20 +8,12 @@
             → مقایسه با median و امتیاز
 """
 
-from datetime import datetime, timedelta, timezone
-
 from . import collector, geo, listing
 from .store import Store
 
 CITIES = {"tehran": "1", "mashhad": "2", "isfahan": "3",
           "karaj": "4", "shiraz": "5", "tabriz": "6"}
 
-# recent_ads دیوار → سقف سن به روز
-RECENT_DAYS = {"3h": 0.125, "12h": 0.5, "1d": 1.0, "3d": 3.0, "7d": 7.0}
-
-# بررسی سن یک درخواست جزئیات به ازای هر آگهی می‌خواهد (۲۵ تا در ۳۰ ثانیه)،
-# پس فقط روی جستجوهای باریک انجام می‌شود.
-AGE_CHECK_MAX = 120
 
 
 def _ranges(size=None, credit_max=None, rent_max=None, age_max=None,
@@ -125,7 +117,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
              "min_images": min_images, "convertible_only": convertible_only,
              "below_median_only": below_median_only,
              "hide_roommate": hide_roommate, "hide_trashed": hide_trashed,
-             "weights": weights, "city": city, "recent_ads": recent_ads,
+             "weights": weights, "city": city,
              "exclude_districts": _exclude_names(exclude_district_ids,
                                                  exclude_district_names, city)}
 
@@ -174,29 +166,6 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                    storage=storage, real_photos=real_photos, **local)
 
 
-def _filter_by_age(items, max_days, store, note):
-    """سن واقعی از صفحه خود آگهی. آگهی بدون زمانِ خوانا نگه داشته می‌شود.
-
-    بازگشت: (آگهی‌ها، آیا بررسی رد شد)
-    """
-    if len(items) > AGE_CHECK_MAX:
-        note(f"زمان انتشار بررسی نشد — {len(items)} آگهی بیش از سقف {AGE_CHECK_MAX}")
-        return items, True
-
-    note(f"بررسی زمان انتشار {len(items)} آگهی ...")
-    details = collector.fetch_details_parallel([i["token"] for i in items], store=store)
-    for item, detail in zip(items, details):
-        item["published_at"] = (detail or {}).get("published_at")
-        item["published_text"] = (detail or {}).get("published_text")
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
-    kept = [i for i in items
-            if not i["published_at"] or datetime.fromisoformat(i["published_at"]) >= cutoff]
-    if len(kept) != len(items):
-        note(f"زمان انتشار: {len(items) - len(kept)} آگهی قدیمی‌تر از بازه کنار رفت")
-    return kept, False
-
-
 def _finish(items, total, rate, note, districts, store=None, complete=True, **filters):
     kept = [i for i in items if listing.passes_hard_filters(
         i,
@@ -230,13 +199,6 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
             before = len(kept)
             kept = [i for i in kept if i.get("token") not in trashed]
             note(f"سطل آشغال: {before - len(kept)} مورد پنهان شد")
-
-    # دیوار recent_ads را بر اساس «نردبان شدن» حساب می‌کند، نه تاریخ انتشار،
-    # پس آگهی یک‌ماهه‌ای که امروز نردبان شده از فیلتر ۷ روزه‌اش رد می‌شود.
-    recent = filters.get("recent_ads")
-    age_check_skipped = False
-    if recent in RECENT_DAYS and store is not None:
-        kept, age_check_skipped = _filter_by_age(kept, RECENT_DAYS[recent], store, note)
 
     city_name = filters.get("city", "tehran")
     for item in kept:
@@ -278,9 +240,6 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
         "collected": len(items),
         "districts_in_region": districts,
         "complete": complete,
-        # وقتی نتایج زیاد باشند سن واقعی بررسی نمی‌شود و فیلتر زمانِ دیوار
-        # (که بر پایه نردبان است) تنها چیزی است که اعمال شده
-        "age_check_skipped": age_check_skipped,
         "weights": {**listing.DEFAULT_WEIGHTS, **(weights or {})},
         "rate": rate,
     }
