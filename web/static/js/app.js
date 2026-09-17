@@ -24,6 +24,8 @@ let state = {
   markers: null,
   markerByToken: new Map(),
   tab: "results",
+  searches: [],
+  missingEnv: [],
   lastPayload: null,
 };
 
@@ -74,6 +76,7 @@ const mapCard = document.getElementById("map-card");
 
 function setMapExpanded(on) {
   mapCard.classList.toggle("map-expanded", on);
+  document.getElementById("map-expand-label").textContent = on ? "بستن" : "تمام‌صفحه";
   // لیفلت اندازه ظرف را کش می‌کند؛ بعد از تغییر ارتفاع باید دوباره بسنجد
   setTimeout(() => map.invalidateSize(), 0);
 }
@@ -230,6 +233,11 @@ document.getElementById("refresh-btn").onclick = () => {
 // مقادیری که کاربر به میلیون وارد می‌کند و API تومان می‌خواهد
 const MILLION_FIELDS = ["credit_max", "rent_max", "max_fre", "max_fre_per_meter"];
 
+// چیپی که از یک جستجوی فقط-نام آمده شناسه عددی ندارد؛ فیلتر محله سمت دیوار
+// فقط عدد می‌فهمد، ولی کنارگذاشتن با نام هم کار می‌کند.
+const numericIds = (chips) =>
+  chips.map((d) => d.id).filter((x) => Number.isInteger(x));
+
 // یک جا ساخته می‌شود تا هم جستجو و هم ذخیره/ویرایش دقیقاً یک شکل بفرستند
 function buildPayload(refresh = false) {
   const data = new FormData(form);
@@ -241,9 +249,9 @@ function buildPayload(refresh = false) {
 
   return {
     polygon: state.polygon,
-    district_ids: state.districts.map((d) => d.id),
+    district_ids: numericIds(state.districts),
     district_names: state.districts.map((d) => d.name),
-    exclude_district_ids: state.excludeDistricts.map((d) => d.id),
+    exclude_district_ids: numericIds(state.excludeDistricts),
     exclude_district_names: state.excludeDistricts.map((d) => d.name),
     size_min: num("size_min"),
     size_max: num("size_max"),
@@ -311,7 +319,6 @@ form.addEventListener("submit", async (e) => {
 
 const saveBtn = document.getElementById("save-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
-const savedBox = document.getElementById("saved-box");
 
 // وقتی پر باشد، دکمه ذخیره به‌جای ساختن جستجوی تازه همین را به‌روز می‌کند
 let editing = null;
@@ -358,8 +365,15 @@ function applyPayload(params) {
   });
 
   // محله‌ها — نام‌ها کنار شناسه‌ها ذخیره می‌شوند تا چیپ‌ها خوانا برگردند
-  const pairs = (ids, names) =>
-    (ids || []).map((id, i) => ({ id, name: (names || [])[i] || `محله ${id}` }));
+  // جستجویی که فقط نام دارد (بدون شناسه) هم باید چیپ‌هایش برگردد
+  const pairs = (ids, names) => {
+    const count = Math.max((ids || []).length, (names || []).length);
+    return Array.from({ length: count }, (_, i) => {
+      const id = (ids || [])[i];
+      const name = (names || [])[i];
+      return { id: id ?? name, name: name || `محله ${id}` };
+    });
+  };
   state.districts = pairs(p.district_ids, p.district_names);
   state.excludeDistricts = pairs(p.exclude_district_ids, p.exclude_district_names);
   renderChips();
@@ -418,59 +432,100 @@ async function patchSearch(id, body) {
 }
 
 const ICON_BTN =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 dark:hover:bg-white/10";
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-500 transition dark:border-gray-700 dark:text-gray-400";
 
 async function loadSaved() {
   const res = await fetch("/api/searches");
   const data = await res.json();
-  savedBox.innerHTML = "";
+  state.searches = data.searches;
+  state.missingEnv = data.missing_env;
 
-  if (data.missing_env.length) {
-    const warn = document.createElement("p");
-    warn.className = "text-theme-xs text-warning-600 dark:text-warning-400";
-    warn.textContent =
-      `برای اطلاع‌رسانی، این‌ها را در .env بگذارید: ${data.missing_env.join("، ")}`;
-    savedBox.appendChild(warn);
-  }
+  const badge = document.querySelector('[data-count="searches"]');
+  if (badge) badge.textContent = fa(data.searches.length);
 
   // جستجویی که ویرایش می‌شد ممکن است حذف شده باشد
   if (editing && !data.searches.find((s) => s.id === editing.id)) setEditing(null);
 
-  data.searches.forEach((s) => {
-    const row = document.createElement("div");
-    row.className =
-      "flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-2 text-theme-xs text-gray-700 dark:border-gray-700 dark:text-gray-400";
-    if (editing && editing.id === s.id) {
-      row.className += " border-brand-500 dark:border-brand-500";
-    }
+  if (state.tab === "searches") renderSearches();
+}
 
-    const label = s.enabled ? "" : "text-gray-400 line-through dark:text-gray-600";
-    row.innerHTML = `
-      <span class="flex-1 truncate ${label}" title="${esc(s.name)}">${esc(s.name)}</span>
-      <button type="button" data-act="toggle" class="${ICON_BTN} hover:text-brand-500"
-        title="${s.enabled ? "موقتاً متوقف کن" : "دوباره فعال کن"}">${s.enabled ? "⏸" : "▶"}</button>
-      <button type="button" data-act="edit" class="${ICON_BTN} hover:text-brand-500"
-        title="ویرایش فیلترها">✎</button>
-      <button type="button" data-act="del" class="${ICON_BTN} hover:text-error-500"
-        title="حذف">✕</button>`;
+/** تب «جستجوها» — همان چیزی که بات هر دور اجرا می‌کند. */
+function renderSearches() {
+  const body = document.getElementById("results-body");
+  const empty = document.getElementById("empty-state");
+  document.getElementById("table-head").classList.add("hidden");
 
-    row.querySelector('[data-act="toggle"]').onclick = () =>
-      patchSearch(s.id, { enabled: !s.enabled });
+  empty.classList.toggle("hidden", state.searches.length > 0);
+  empty.textContent =
+    "هنوز جستجویی ذخیره نشده. در نوار کناری فیلترها را تنظیم کنید و «ذخیره برای اطلاع‌رسانی» را بزنید.";
 
-    row.querySelector('[data-act="edit"]').onclick = () => {
-      setEditing(s);
-      loadSaved();
+  const note = state.missingEnv.length
+    ? `<tr><td class="td text-warning-600 dark:text-warning-400" colspan="${COLS}">
+         برای اطلاع‌رسانی، این‌ها را در .env بگذارید: ${esc(state.missingEnv.join("، "))}
+       </td></tr>`
+    : "";
+
+  body.innerHTML =
+    note +
+    state.searches
+      .map(
+        (s, i) => `<tr class="border-b border-gray-100 dark:border-gray-800" data-sid="${s.id}">
+        <td class="td" colspan="${COLS - 1}">
+          <span class="${s.enabled ? "text-gray-800 dark:text-white/90" : "text-gray-400 line-through dark:text-gray-600"}">${esc(s.name)}</span>
+          ${editing && editing.id === s.id
+            ? '<span class="ms-2 rounded-full bg-brand-50 px-2 py-0.5 text-theme-xs text-brand-600 dark:bg-brand-500/15 dark:text-brand-400">در حال ویرایش</span>'
+            : ""}
+          <span class="block text-theme-xs text-gray-400">
+            ${s.enabled ? "فعال" : "متوقف"}
+            ${s.last_run_at ? `· آخرین اجرا ${esc(s.last_run_at.slice(0, 16).replace("T", " "))}` : "· هنوز اجرا نشده"}
+            ${describeParams(s.params)}
+          </span>
+        </td>
+        <td class="td whitespace-nowrap">
+          <div class="flex items-center gap-1.5">
+            <button type="button" data-act="toggle" data-idx="${i}" class="${ICON_BTN} hover:border-brand-500 hover:text-brand-500"
+              title="${s.enabled ? "موقتاً متوقف کن" : "دوباره فعال کن"}">${s.enabled ? "⏸" : "▶"}</button>
+            <button type="button" data-act="edit" data-idx="${i}" class="${ICON_BTN} hover:border-brand-500 hover:text-brand-500"
+              title="فیلترها را در نوار کناری باز کن">✎</button>
+            <button type="button" data-act="del" data-idx="${i}" class="${ICON_BTN} hover:border-error-500 hover:text-error-500"
+              title="حذف">✕</button>
+          </div>
+        </td>
+      </tr>`
+      )
+      .join("");
+
+  body.querySelectorAll("[data-act]").forEach((btn) => {
+    const s = state.searches[Number(btn.dataset.idx)];
+    btn.onclick = async () => {
+      if (btn.dataset.act === "toggle") {
+        await patchSearch(s.id, { enabled: !s.enabled });
+      } else if (btn.dataset.act === "edit") {
+        setEditing(s);
+        renderSearches();
+        // فرم در نوار کناری پر شد — دکمه «به‌روزرسانی» را جلوی چشم بیاور
+        saveBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (confirm(`«${s.name}» حذف شود؟`)) {
+        await fetch(`/api/searches/${s.id}`, { method: "DELETE" });
+        if (editing && editing.id === s.id) setEditing(null);
+        await loadSaved();
+      }
     };
-
-    row.querySelector('[data-act="del"]').onclick = async () => {
-      if (!confirm(`«${s.name}» حذف شود؟`)) return;
-      await fetch(`/api/searches/${s.id}`, { method: "DELETE" });
-      if (editing && editing.id === s.id) setEditing(null);
-      loadSaved();
-    };
-
-    savedBox.appendChild(row);
   });
+}
+
+/** خلاصه یک‌خطی از فیلترها، تا بشود جستجوها را از هم تشخیص داد. */
+function describeParams(p) {
+  const bits = [];
+  if (p.polygon?.length) bits.push("محدوده نقشه");
+  if (p.district_names?.length) bits.push(esc(p.district_names.join("، ")));
+  if (p.exclude_district_names?.length)
+    bits.push(`بجز ${esc(p.exclude_district_names.join("، "))}`);
+  if (p.size_min || p.size_max)
+    bits.push(`${fa(p.size_min ?? 0)}–${p.size_max ? fa(p.size_max) : "∞"}م²`);
+  if (p.rooms_min) bits.push(`${fa(p.rooms_min)}+ خواب`);
+  if (p.credit_max) bits.push(`ودیعه تا ${million(p.credit_max)}م`);
+  return bits.length ? `· ${bits.join(" · ")}` : "";
 }
 
 /* ---------- نمایش نتایج ---------- */
@@ -791,6 +846,12 @@ async function showTab(tab) {
   if (tab === "results") {
     head.classList.remove("hidden");
     renderTable();
+    return;
+  }
+
+  if (tab === "searches") {
+    await loadSaved();
+    renderSearches();
     return;
   }
 
