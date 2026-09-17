@@ -28,7 +28,12 @@ let state = {
 
 /* ---------- نقشه ---------- */
 
-const map = L.map("map").setView([35.7219, 51.3347], 12);
+const map = L.map("map", {
+  // پیش‌فرض لیفلت هر بار یک واحد کامل زوم می‌کند و جهش می‌زند؛ این ریزترش می‌کند
+  zoomSnap: 0.25,
+  zoomDelta: 0.25,
+  wheelPxPerZoomLevel: 240,
+}).setView([35.7219, 51.3347], 12);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: "© OpenStreetMap",
@@ -60,6 +65,25 @@ map.on(L.Draw.Event.CREATED, (e) => {
 
 map.on(L.Draw.Event.DELETED, () => {
   state.polygon = null;
+});
+
+/* ---------- تمام‌صفحه کردن نقشه ---------- */
+
+const mapCard = document.getElementById("map-card");
+
+function setMapExpanded(on) {
+  mapCard.classList.toggle("map-expanded", on);
+  // لیفلت اندازه ظرف را کش می‌کند؛ بعد از تغییر ارتفاع باید دوباره بسنجد
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
+document.getElementById("map-expand").onclick = () =>
+  setMapExpanded(!mapCard.classList.contains("map-expanded"));
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && mapCard.classList.contains("map-expanded")) {
+    setMapExpanded(false);
+  }
 });
 
 /* ---------- انتخاب محله ---------- */
@@ -179,8 +203,11 @@ document.getElementById("refresh-btn").onclick = () => {
   form.requestSubmit();
 };
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
+// مقادیری که کاربر به میلیون وارد می‌کند و API تومان می‌خواهد
+const MILLION_FIELDS = ["credit_max", "rent_max", "max_fre", "max_fre_per_meter"];
+
+// یک جا ساخته می‌شود تا هم جستجو و هم ذخیره/ویرایش دقیقاً یک شکل بفرستند
+function buildPayload(refresh = false) {
   const data = new FormData(form);
   const num = (k) => {
     const v = data.get(k);
@@ -188,9 +215,10 @@ form.addEventListener("submit", async (e) => {
   };
   const on = (k) => data.get(k) === "on";
 
-  const payload = {
+  return {
     polygon: state.polygon,
     district_ids: state.districts.map((d) => d.id),
+    district_names: state.districts.map((d) => d.name),
     size_min: num("size_min"),
     size_max: num("size_max"),
     rooms_min: num("rooms_min"),
@@ -224,8 +252,13 @@ form.addEventListener("submit", async (e) => {
     hide_roommate: on("hide_roommate"),
     // وزن‌ها برای اطلاع‌رسانی ذخیره می‌شوند؛ پنل خودش بازمحاسبه می‌کند
     weights: { ...state.weights },
-    refresh: forceRefresh,
+    refresh,
   };
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const payload = buildPayload(forceRefresh);
 
   state.lastPayload = payload;
   setLoading(true);
@@ -240,7 +273,6 @@ form.addEventListener("submit", async (e) => {
     });
     if (!res.ok) throw new Error(await res.text());
     render(await res.json());
-    saveBtn.disabled = false;
   } catch (err) {
     setProgress(`خطا: ${err.message}`);
   } finally {
@@ -252,20 +284,95 @@ form.addEventListener("submit", async (e) => {
 /* ---------- جستجوهای ذخیره‌شده ---------- */
 
 const saveBtn = document.getElementById("save-btn");
+const cancelEditBtn = document.getElementById("cancel-edit-btn");
 const savedBox = document.getElementById("saved-box");
 
+// وقتی پر باشد، دکمه ذخیره به‌جای ساختن جستجوی تازه همین را به‌روز می‌کند
+let editing = null;
+
+function setEditing(s) {
+  editing = s;
+  saveBtn.textContent = s ? `به‌روزرسانی «${s.name}»` : "ذخیره برای اطلاع‌رسانی";
+  cancelEditBtn.classList.toggle("hidden", !s);
+  if (s) {
+    applyPayload(s.params);
+    setProgress(`فیلترهای «${s.name}» بارگذاری شد — تغییر بدهید و به‌روزرسانی بزنید.`);
+  }
+}
+
+cancelEditBtn.onclick = () => {
+  setEditing(null);
+  setProgress("");
+};
+
+/** فیلترهای یک جستجوی ذخیره‌شده را در فرم و نقشه می‌نشاند — وارونه buildPayload. */
+function applyPayload(params) {
+  const p = params || {};
+  form.reset();
+
+  Object.entries(p).forEach(([key, val]) => {
+    const el = form.querySelector(`[name="${key}"]`);
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = Boolean(val);
+    else if (val == null || val === "") el.value = "";
+    else el.value = MILLION_FIELDS.includes(key) ? val / 1e6 : val;
+  });
+
+  // دکمه‌های اتاق با مقدار مخفی rooms_min هماهنگ شوند
+  const rooms = p.rooms_min == null ? "" : String(p.rooms_min);
+  document.querySelectorAll(".room-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.rooms === rooms)
+  );
+
+  // اسلایدرهای وزن — رویداد input باعث بازمحاسبه امتیازها می‌شود
+  document.querySelectorAll("input[data-weight]").forEach((slider) => {
+    const w = (p.weights || {})[slider.dataset.weight];
+    if (w != null) slider.value = w;
+    slider.dispatchEvent(new Event("input"));
+  });
+
+  // محله‌ها — نام‌ها کنار شناسه‌ها ذخیره می‌شوند تا چیپ‌ها خوانا برگردند
+  const names = p.district_names || [];
+  state.districts = (p.district_ids || []).map((id, i) => ({
+    id,
+    name: names[i] || `محله ${id}`,
+  }));
+  renderChips();
+
+  // چندضلعی روی نقشه
+  drawnItems.clearLayers();
+  state.polygon = p.polygon || null;
+  if (state.polygon && state.polygon.length) {
+    const layer = L.polygon(
+      state.polygon.map(([lng, lat]) => [lat, lng]),
+      { color: "#465fff" }
+    );
+    drawnItems.addLayer(layer);
+    map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+  }
+}
+
 saveBtn.onclick = async () => {
-  if (!state.lastPayload) return;
-  const name = prompt("نامی برای این جستجو:");
+  const params = buildPayload();
+  const name = prompt("نامی برای این جستجو:", editing ? editing.name : "");
   if (!name) return;
+
   saveBtn.disabled = true;
   try {
-    const res = await fetch("/api/searches", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, params: state.lastPayload }),
-    });
+    const res = editing
+      ? await fetch(`/api/searches/${editing.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, params }),
+        })
+      : await fetch("/api/searches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, params }),
+        });
     if (!res.ok) throw new Error(await res.text());
+    setEditing(null);
+    setProgress("ذخیره شد.");
     await loadSaved();
   } catch (err) {
     setProgress(`ذخیره نشد: ${err.message}`);
@@ -273,6 +380,19 @@ saveBtn.onclick = async () => {
     saveBtn.disabled = false;
   }
 };
+
+async function patchSearch(id, body) {
+  const res = await fetch(`/api/searches/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) setProgress(`انجام نشد: ${await res.text()}`);
+  await loadSaved();
+}
+
+const ICON_BTN =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 dark:hover:bg-white/10";
 
 async function loadSaved() {
   const res = await fetch("/api/searches");
@@ -287,15 +407,42 @@ async function loadSaved() {
     savedBox.appendChild(warn);
   }
 
+  // جستجویی که ویرایش می‌شد ممکن است حذف شده باشد
+  if (editing && !data.searches.find((s) => s.id === editing.id)) setEditing(null);
+
   data.searches.forEach((s) => {
     const row = document.createElement("div");
     row.className =
-      "flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-theme-xs text-gray-700 dark:border-gray-700 dark:text-gray-400";
-    row.innerHTML = `<span>${esc(s.name)}</span><button type="button" class="text-gray-400 hover:text-error-500">✕</button>`;
-    row.querySelector("button").onclick = async () => {
-      await fetch(`/api/searches/${s.id}`, { method: "DELETE" });
+      "flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-2 text-theme-xs text-gray-700 dark:border-gray-700 dark:text-gray-400";
+    if (editing && editing.id === s.id) {
+      row.className += " border-brand-500 dark:border-brand-500";
+    }
+
+    const label = s.enabled ? "" : "text-gray-400 line-through dark:text-gray-600";
+    row.innerHTML = `
+      <span class="flex-1 truncate ${label}" title="${esc(s.name)}">${esc(s.name)}</span>
+      <button type="button" data-act="toggle" class="${ICON_BTN} hover:text-brand-500"
+        title="${s.enabled ? "موقتاً متوقف کن" : "دوباره فعال کن"}">${s.enabled ? "⏸" : "▶"}</button>
+      <button type="button" data-act="edit" class="${ICON_BTN} hover:text-brand-500"
+        title="ویرایش فیلترها">✎</button>
+      <button type="button" data-act="del" class="${ICON_BTN} hover:text-error-500"
+        title="حذف">✕</button>`;
+
+    row.querySelector('[data-act="toggle"]').onclick = () =>
+      patchSearch(s.id, { enabled: !s.enabled });
+
+    row.querySelector('[data-act="edit"]').onclick = () => {
+      setEditing(s);
       loadSaved();
     };
+
+    row.querySelector('[data-act="del"]').onclick = async () => {
+      if (!confirm(`«${s.name}» حذف شود؟`)) return;
+      await fetch(`/api/searches/${s.id}`, { method: "DELETE" });
+      if (editing && editing.id === s.id) setEditing(null);
+      loadSaved();
+    };
+
     savedBox.appendChild(row);
   });
 }

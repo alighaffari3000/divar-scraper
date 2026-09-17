@@ -64,6 +64,8 @@ class SearchRequest(BaseModel):
     city: str = "tehran"
     polygon: list[list[float]] | None = None
     district_ids: list[int] = []
+    # فقط برای بازسازی چیپ‌ها موقع ویرایش؛ موتور جستجو نادیده‌اش می‌گیرد
+    district_names: list[str] = []
     size_min: float | None = None
     size_max: float | None = None
     rooms_min: int | None = None
@@ -92,6 +94,9 @@ class SearchRequest(BaseModel):
     convertible_only: bool = False
     below_median_only: bool = False
     hide_roommate: bool = True
+    # وزن معیارهای امتیاز — بدون این، جستجوی ذخیره‌شده وزن‌های پنل را از دست
+    # می‌داد و بات همیشه با وزن پیش‌فرض امتیاز می‌داد
+    weights: dict[str, float] | None = None
     refresh: bool = False  # کش را دور بزن
 
 
@@ -165,7 +170,9 @@ def searches():
         rows = store.list_searches()
     return {
         "searches": [{"id": r["id"], "name": r["name"],
-                      "created_at": r["created_at"], "last_run_at": r["last_run_at"]}
+                      "created_at": r["created_at"], "last_run_at": r["last_run_at"],
+                      "enabled": bool(r.get("enabled", 1)),
+                      "params": json.loads(r["params_json"])}
                      for r in rows],
         "telegram_ready": config.telegram_ready(),
         "missing_env": config.missing(),
@@ -210,6 +217,27 @@ def save_search(req: SaveRequest):
     with Store() as store:
         new_id = store.save_search(req.name, params)
     return {"id": new_id}
+
+
+class UpdateSearchRequest(BaseModel):
+    """هر سه اختیاری — تغییر نام، تغییر فیلترها، فعال/غیرفعال کردن."""
+
+    name: str | None = None
+    params: SearchRequest | None = None
+    enabled: bool | None = None
+
+
+@app.patch("/api/searches/{search_id}")
+def update_search(search_id: int, req: UpdateSearchRequest):
+    params = None
+    if req.params is not None:
+        params = req.params.model_dump()
+        params.pop("city", None)
+    with Store() as store:
+        if not store.get_search(search_id):
+            raise HTTPException(404, "جستجو یافت نشد")
+        store.update_search(search_id, name=req.name, params=params, enabled=req.enabled)
+    return {"ok": True}
 
 
 @app.delete("/api/searches/{search_id}")

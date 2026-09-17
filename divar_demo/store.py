@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS searches (
     params_json    TEXT NOT NULL,
     created_at     TEXT NOT NULL,
     last_run_at    TEXT,
-    notify_chat_id TEXT
+    notify_chat_id TEXT,
+    enabled        INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS marks (
     token    TEXT NOT NULL,
@@ -96,6 +97,14 @@ class Store:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.executescript(SCHEMA)
+            # دیتابیس‌هایی که قبل از افزوده‌شدن enabled ساخته شده‌اند
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(searches)")}
+            if "enabled" not in cols:
+                try:
+                    self.conn.execute(
+                        "ALTER TABLE searches ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+                except sqlite3.OperationalError:
+                    pass  # اتصال دیگری (پنل یا بات) هم‌زمان همین را اضافه کرده
             self.conn.commit()
 
     def close(self):
@@ -241,10 +250,40 @@ class Store:
             self.conn.commit()
             return cur.lastrowid
 
-    def list_searches(self):
+    def list_searches(self, only_enabled=False):
+        sql = "SELECT * FROM searches"
+        if only_enabled:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY created_at DESC"
         with self.lock:
-            return [dict(r) for r in
-                    self.conn.execute("SELECT * FROM searches ORDER BY created_at DESC")]
+            return [dict(r) for r in self.conn.execute(sql)]
+
+    def get_search(self, search_id):
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM searches WHERE id = ?", (search_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_search(self, search_id, name=None, params=None, enabled=None):
+        """هر سه اختیاری‌اند — فقط چیزی که داده شده نوشته می‌شود."""
+        sets, vals = [], []
+        if name is not None:
+            sets.append("name = ?")
+            vals.append(name)
+        if params is not None:
+            sets.append("params_json = ?")
+            vals.append(json.dumps(params, ensure_ascii=False))
+        if enabled is not None:
+            sets.append("enabled = ?")
+            vals.append(1 if enabled else 0)
+        if not sets:
+            return False
+        vals.append(search_id)
+        with self.lock:
+            cur = self.conn.execute(
+                f"UPDATE searches SET {', '.join(sets)} WHERE id = ?", vals)
+            self.conn.commit()
+        return cur.rowcount > 0
 
     def mark_search_run(self, search_id):
         with self.lock:

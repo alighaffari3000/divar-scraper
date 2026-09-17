@@ -914,6 +914,21 @@ pre[class*="language-"] {
   font-family: Vazirmatn, Tahoma, sans-serif;
 }
 
+/* نقشه تمام‌صفحه — دکمه بزرگ‌نمایی روی کارت نقشه این کلاس را می‌گذارد.
+   کلاس روی خود کارت می‌نشیند تا تیتر و چیپ‌های محدوده هم دیده شوند. */
+#map-card.map-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  margin: 0;
+  border-radius: 0;
+  overflow: auto;
+}
+#map-card.map-expanded #map {
+  height: calc(100vh - 9rem);
+  border-radius: 0;
+}
+
 @layer components {
   .mini-input {
     @apply h-10 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-theme-sm text-gray-800 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:text-white/90;

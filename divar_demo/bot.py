@@ -122,7 +122,7 @@ async def run_cycle(bot, store, trigger="timer"):
         threshold = conf["score_threshold"]
         already = store.sent_tokens(chat_id())
 
-        for saved in store.list_searches():
+        for saved in store.list_searches(only_enabled=True):
             kwargs = search.params_from_request(json.loads(saved["params_json"]))
             log.info("اجرای «%s» (%s)", saved["name"], trigger)
             result = await asyncio.to_thread(

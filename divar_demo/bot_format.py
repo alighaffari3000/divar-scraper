@@ -188,5 +188,7 @@ def searches_text(rows):
     lines = [f"🔎 <b>جستجوهای ذخیره‌شده ({len(rows)})</b>", ""]
     for r in rows:
         last = r.get("last_run_at")
-        lines.append(f"• {esc(r['name'])}" + (f" — آخرین اجرا {esc(last[:16])}" if last else ""))
+        mark = "" if r.get("enabled", 1) else " ⏸ غیرفعال"
+        lines.append(f"• {esc(r['name'])}{mark}"
+                     + (f" — آخرین اجرا {esc(last[:16])}" if last else ""))
     return "\n".join(lines)
