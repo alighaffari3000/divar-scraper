@@ -211,7 +211,10 @@ def passes_hard_filters(item, size=None, rooms=None, credit=None, rent=None,
         return False
     if need_elevator and item["elevator"] is not True:
         return False
-    if need_storage and item["storage"] is not True:
+    # کارت نقشه آیکون انباری ندارد، پس storage همیشه None است. فیلتر سمت
+    # دیوار کار را کرده؛ این فقط جلوی آگهی‌ای را می‌گیرد که جزئیاتش صریحاً
+    # گفته انباری ندارد. با شرط «is not True» هر بار صفر نتیجه می‌ماند.
+    if need_storage and item.get("storage") is False:
         return False
     # فیلتر سمت دیوار کار اصلی را کرده؛ این فقط وقتی جزئیات موجود باشد اثر دارد
     if need_real_photos and item.get("real_photos") is False:
