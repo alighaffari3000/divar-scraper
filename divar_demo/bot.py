@@ -87,17 +87,19 @@ def photo_bytes(url):
 
 
 def photo_urls(store, item):
-    """آدرس عکس‌های اندازه کامل. اگر جزئیات در دسترس نبود، بندانگشتی کارت.
-
-    جزئیات کش می‌شود، پس این معمولاً درخواست شبکه اضافه ندارد.
-    """
+    """آدرس عکس‌های اندازه کامل. اگر جزئیات در دسترس نبود، بندانگشتی کارت."""
+    token = item["token"]
     try:
-        for detail in collector.fetch_details([item["token"]], store=store):
-            urls = (detail or {}).get("images") or []
-            if urls:
-                return urls
+        urls = (store.get_detail(token) or {}).get("images") or []
+        if not urls:
+            # کش قبل از افزوده‌شدن images پر شده بود — تازه بگیر و همان را جا بگذار
+            detail = collector.fetch_detail(token)
+            store.put_detail(token, detail)
+            urls = detail.get("images") or []
+        if urls:
+            return urls
     except Exception:
-        log.warning("گرفتن عکس‌های %s نشد", item["token"], exc_info=True)
+        log.warning("گرفتن عکس‌های %s نشد", token, exc_info=True)
     return [item["image_url"]] if item.get("image_url") else []
 
 
