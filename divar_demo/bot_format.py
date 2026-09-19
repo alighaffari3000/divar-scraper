@@ -45,15 +45,11 @@ def caption(item, median):
         f"  →  رهن معادل <b>{m(item.get('full_rent_equivalent'))}م</b>"
         f" (متری {m(item.get('fre_per_meter'))}م)")
 
-    market = ""
     vs = item.get("vs_market_pct")
     if vs is not None:
-        market = f"📊 {abs(round(vs))}٪ {'زیر' if vs < 0 else 'بالای'} median"
-    metro = ""
+        lines.append(f"📊 {abs(round(vs))}٪ {'زیر' if vs < 0 else 'بالای'} median")
     if item.get("metro_distance_m") is not None:
-        metro = f"🚇 {esc(item.get('metro_name'))} {item['metro_distance_m']:,}م"
-    if market or metro:
-        lines.append("   ·   ".join(filter(None, [market, metro])))
+        lines.append(f"🚇 {esc(item.get('metro_name'))} {item['metro_distance_m']:,}م")
 
     amenities = " · ".join(filter(None, [
         "پارکینگ" if item.get("parking") else None,
