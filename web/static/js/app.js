@@ -649,9 +649,14 @@ function renderTable() {
         (r.bumped
           ? '<span class="tag tag-warn me-1" title="آگهی قدیمی که دوباره بالا آورده شده — فیلتر «آگهی‌های اخیر» دیوار بر همین پایه است، نه تاریخ انتشار">نردبان</span>'
           : "");
+      // پین تقریبی تا ۲۰۰ متر جابه‌جاست، پس عددش را قطعی نشان ندهیم
+      const approx = r.approximate_location
+        ? ' title="موقعیت این آگهی تقریبی است — دیوار پین را تا ۲۰۰ متر جابه‌جا می‌کند"'
+        : "";
       const metro = r.metro_distance_m == null
         ? "—"
-        : `<span class="${r.metro_distance_m <= 800 ? "text-success-600" : ""}">${fa(r.metro_distance_m)}م</span>
+        : `<span class="${r.metro_distance_m <= 800 ? "text-success-600" : ""}"${approx}>${
+             r.approximate_location ? "~" : ""}${fa(r.metro_distance_m)}م</span>
            <span class="block text-theme-xs text-gray-400">${esc(r.metro_name)}</span>`;
       const scoreTitle = Object.entries(r.score_parts ?? {})
         .map(([k, v]) => `${WEIGHT_LABELS[k] ?? k}: ${v > 0 ? "+" : ""}${v}`)

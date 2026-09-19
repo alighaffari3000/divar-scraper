@@ -49,7 +49,11 @@ def caption(item, median):
     if vs is not None:
         lines.append(f"📊 {abs(round(vs))}٪ {'زیر' if vs < 0 else 'بالای'} median")
     if item.get("metro_distance_m") is not None:
-        lines.append(f"🚇 {esc(item.get('metro_name'))} {item['metro_distance_m']:,}م")
+        # تلگرام tooltip ندارد، پس تقریبی بودن باید در خود متن بیاید
+        approx = " (پین تقریبی)" if item.get("approximate_location") else ""
+        tilde = "~" if approx else ""
+        lines.append(f"🚇 {esc(item.get('metro_name'))} "
+                     f"{tilde}{item['metro_distance_m']:,}م{approx}")
 
     amenities = " · ".join(filter(None, [
         "پارکینگ" if item.get("parking") else None,
