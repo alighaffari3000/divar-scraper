@@ -10,6 +10,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 # پین‌های دیوار وقتی approximate_location باشند تا چند صد متر جابه‌جا هستند
 APPROX_TOLERANCE_DEG = 0.002  # ≈ ۲۰۰ متر
+APPROX_TOLERANCE_M = 200      # همان تلورانس، برای فاصله‌های متری
 
 
 def bbox_of(polygon):

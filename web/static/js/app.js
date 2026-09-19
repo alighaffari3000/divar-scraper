@@ -281,6 +281,7 @@ function buildPayload(refresh = false) {
     max_fre: num("max_fre") ? num("max_fre") * 1e6 : null,
     max_fre_per_meter: num("max_fre_per_meter") ? num("max_fre_per_meter") * 1e6 : null,
     min_images: num("min_images"),
+    max_metro_distance_m: num("max_metro_distance_m"),
     convertible_only: on("convertible_only"),
     below_median_only: on("below_median_only"),
     hide_roommate: on("hide_roommate"),

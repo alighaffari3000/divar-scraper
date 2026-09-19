@@ -67,6 +67,8 @@ def build_args():
     o.add_argument("--max-fre", type=float, help="حداکثر رهن کامل معادل (تومان)")
     o.add_argument("--max-fre-per-meter", type=float, help="حداکثر رهن معادل متری (تومان)")
     o.add_argument("--min-images", type=int, help="حداقل تعداد عکس")
+    o.add_argument("--max-metro-distance", type=int,
+                   help="حداکثر فاصله تا نزدیک‌ترین مترو (متر، مستقیم)")
     o.add_argument("--convertible-only", action="store_true",
                    help="فقط ودیعه/اجاره قابل تبدیل")
     o.add_argument("--below-median", action="store_true", help="فقط زیر median بازار")
@@ -133,6 +135,7 @@ def main():
         max_fre=args.max_fre,
         max_fre_per_meter=args.max_fre_per_meter,
         min_images=args.min_images,
+        max_metro_distance_m=args.max_metro_distance,
         convertible_only=args.convertible_only,
         below_median_only=args.below_median,
         rate=args.rate,

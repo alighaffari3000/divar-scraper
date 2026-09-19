@@ -93,6 +93,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                units_per_floor_max=None, recent_ads=None, toilet=None,
                heating_system=None, cooling_system=None,
                max_fre=None, max_fre_per_meter=None, min_images=None,
+               max_metro_distance_m=None,
                convertible_only=False, below_median_only=False,
                hide_roommate=True, hide_trashed=True, weights=None,
                exclude_district_ids=None, exclude_district_names=None,
@@ -115,6 +116,7 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                "heating_system": heating_system, "cooling_system": cooling_system}
     local = {"max_fre": max_fre, "max_fre_per_meter": max_fre_per_meter,
              "min_images": min_images, "convertible_only": convertible_only,
+             "max_metro_distance_m": max_metro_distance_m,
              "below_median_only": below_median_only,
              "hide_roommate": hide_roommate, "hide_trashed": hide_trashed,
              "weights": weights, "city": city,
@@ -166,6 +168,16 @@ def run_search(*, city="tehran", polygon=None, bbox=None, district_ids=None,
                    storage=storage, real_photos=real_photos, **local)
 
 
+def _within_metro(item, limit):
+    """فاصله تا مترو زیر سقف است؟ پین تقریبی تلورانس می‌گیرد."""
+    dist = item["metro_distance_m"]
+    if dist is None:
+        return False
+    if item.get("approximate_location"):
+        limit += geo.APPROX_TOLERANCE_M
+    return dist <= limit
+
+
 def _finish(items, total, rate, note, districts, store=None, complete=True, **filters):
     kept = [i for i in items if listing.passes_hard_filters(
         i,
@@ -205,6 +217,20 @@ def _finish(items, total, rate, note, districts, store=None, complete=True, **fi
         name, dist = geo.nearest_metro(item.get("lat"), item.get("lon"), city_name)
         item["metro_name"] = name
         item["metro_distance_m"] = dist
+
+    # فاصله مترو بعد از فیلترهای قطعی حساب می‌شود، پس فیلترش هم همین‌جاست.
+    # آگهی بدون فاصله (پین ندارد یا شهر داده مترو ندارد) کنار می‌رود — وقتی
+    # کاربر سقف فاصله گذاشته، نزدیک بودنِ اثبات‌نشده به درد نمی‌خورد.
+    #
+    # پین تقریبی همان تلورانس فیلتر چندضلعی را می‌گیرد: دیوار مختصات را عمداً
+    # تا چند صد متر جابه‌جا می‌کند، پس آگهی‌ای که واقعاً سر ایستگاه است ممکن
+    # است ۷۰۰ متر اندازه‌گیری شود. بیرون انداختنش یعنی جریمه کردن ملک برای
+    # کاری که فروشنده کرده، نه برای فاصله‌اش.
+    limit = filters.get("max_metro_distance_m")
+    if limit:
+        before = len(kept)
+        kept = [i for i in kept if _within_metro(i, limit)]
+        note(f"فاصله تا مترو حداکثر {limit} متر: {before} → {len(kept)}")
 
     if store is not None:
         new_tokens = store.record(kept)

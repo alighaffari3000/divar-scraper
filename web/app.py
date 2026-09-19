@@ -94,6 +94,7 @@ class SearchRequest(BaseModel):
     max_fre: float | None = None
     max_fre_per_meter: float | None = None
     min_images: int | None = None
+    max_metro_distance_m: int | None = None
     convertible_only: bool = False
     below_median_only: bool = False
     hide_roommate: bool = True
