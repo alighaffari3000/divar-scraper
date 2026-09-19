@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 from telegram import InputMediaPhoto, Update
-from telegram.error import BadRequest, Forbidden, TelegramError
+from telegram.error import BadRequest, Forbidden, RetryAfter, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from . import bot_format as fmt
@@ -34,6 +34,30 @@ log = logging.getLogger("divar.bot")
 TICK_SECONDS = 60
 PHOTOS_PER_POST = 3  # تلگرام تا ۱۰ تا در گالری می‌پذیرد؛ ۳ تا گروه را شلوغ نمی‌کند
 cycle_lock = asyncio.Lock()
+
+# پیش‌فرض کتابخانه ۵ ثانیه است. تلگرام آلبوم را تحویل می‌دهد ولی جوابش دیرتر
+# می‌رسد؛ کلاینت رها می‌کرد و «شکست» فرض می‌شد — آلبوم در گروه بود و کپشن
+# بدون reply زیرش می‌افتاد.
+TG_TIMEOUT = 60
+
+
+async def tg(call, *args, **kwargs):
+    """یک درخواست تلگرام؛ اگر گفت «صبر کن»، همان‌قدر صبر می‌کند و دوباره می‌زند.
+
+    هر پست ۴ پیام است (۳ عکس + کپشن) و سقف گروه ۲۰ در دقیقه، پس RetryAfter
+    عادی است نه خطا. بدون این، یک دور ۱۰تایی وسط کار می‌مرد و آگهی نیمه‌پست‌شده
+    دور بعد دوباره می‌آمد.
+    """
+    for attempt in range(4):
+        try:
+            return await call(*args, **kwargs)
+        except RetryAfter as exc:
+            if attempt == 3:
+                raise
+            wait = exc.retry_after
+            wait = wait.total_seconds() if hasattr(wait, "total_seconds") else float(wait)
+            log.info("تلگرام گفت %.0f ثانیه صبر کن", wait)
+            await asyncio.sleep(wait + 1)
 
 
 # ---------- کمکی ----------
@@ -123,29 +147,31 @@ async def post_item(bot, store, item, median, search_id):
     # آلبوم بدون کپشن، و بلافاصله زیرش متن کامل با دکمه‌های شیشه‌ای به‌صورت
     # reply. کپشن روی آلبوم هم می‌شد گذاشت ولی آن‌وقت متن زیر عکس‌ها فشرده
     # می‌شود و دکمه‌ها از متن جدا می‌افتند.
+    #
+    # سرنوشت آلبوم و کپشن جداست: اگر آلبوم رفت و کپشن خطا داد، نباید کپشن
+    # بدون reply فرستاده شود — همان کپشن یتیمی که معلوم نیست مال کدام آلبوم است.
     if len(photos) > 1:
         try:
-            group = await bot.send_media_group(
-                chat_id(), media=[InputMediaPhoto(p) for p in photos])
+            group = await tg(bot.send_media_group, chat_id(),
+                             media=[InputMediaPhoto(p) for p in photos])
             media_ids = [m.message_id for m in group]
-            msg = await bot.send_message(chat_id(), text, parse_mode="HTML",
-                                         reply_markup=kb,
-                                         reply_to_message_id=media_ids[0],
-                                         disable_web_page_preview=True)
         except TelegramError as exc:
             log.warning("send_media_group failed for %s: %s", item["token"], exc)
-            msg, media_ids = None, []
+        if media_ids:
+            msg = await tg(bot.send_message, chat_id(), text, parse_mode="HTML",
+                           reply_markup=kb, reply_to_message_id=media_ids[0],
+                           disable_web_page_preview=True)
     elif len(photos) == 1:
         try:
             # کپشن عکس تکی تا ۱۰۲۴ نویسه مجاز است (متن ساده تا ۴۰۹۶)
-            msg = await bot.send_photo(chat_id(), photo=photos[0], caption=text[:1024],
-                                       parse_mode="HTML", reply_markup=kb)
+            msg = await tg(bot.send_photo, chat_id(), photo=photos[0],
+                           caption=text[:1024], parse_mode="HTML", reply_markup=kb)
         except TelegramError as exc:
             log.warning("send_photo failed for %s: %s", item["token"], exc)
 
     if msg is None:
-        msg = await bot.send_message(chat_id(), text, parse_mode="HTML", reply_markup=kb,
-                                     disable_web_page_preview=True)
+        msg = await tg(bot.send_message, chat_id(), text, parse_mode="HTML",
+                       reply_markup=kb, disable_web_page_preview=True)
 
     store.record_sent(item["token"], chat_id(), msg.message_id, search_id,
                       item.get("score"), item.get("full_rent_equivalent"),
@@ -203,12 +229,12 @@ async def run_cycle(bot, store, trigger="timer"):
                 cut = prev["last_fre"] * (1 - config.NOTIFY_PRICE_DROP_PCT / 100)
                 if item["full_rent_equivalent"] <= cut:
                     try:
-                        await bot.send_message(
-                            chat_id(), fmt.drop_reply(item, prev["last_fre"]),
-                            parse_mode="HTML", reply_to_message_id=prev["message_id"])
+                        await tg(bot.send_message,
+                                 chat_id(), fmt.drop_reply(item, prev["last_fre"]),
+                                 parse_mode="HTML", reply_to_message_id=prev["message_id"])
                     except BadRequest:  # پست اصلی حذف شده — بدون reply
-                        await bot.send_message(chat_id(), fmt.drop_reply(item, prev["last_fre"]),
-                                               parse_mode="HTML")
+                        await tg(bot.send_message, chat_id(),
+                                 fmt.drop_reply(item, prev["last_fre"]), parse_mode="HTML")
                     store.update_sent_fre(item["token"], chat_id(), item["full_rent_equivalent"])
                     sent += 1
 
@@ -419,7 +445,9 @@ def main():
         print("TELEGRAM_BOT_TOKEN در .env نیست.", file=sys.stderr)
         return 1
 
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+    app = (Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(post_init)
+           .connect_timeout(15).read_timeout(TG_TIMEOUT).write_timeout(TG_TIMEOUT)
+           .media_write_timeout(TG_TIMEOUT).build())
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler(["start", "help"], cmd_help))
     app.add_handler(CommandHandler("status", cmd_status))
